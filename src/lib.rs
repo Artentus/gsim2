@@ -180,15 +180,6 @@ mod private {
 
     impl_linked_list_node!(WireDriver => next_driver);
 
-    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
-    #[repr(C)]
-    pub struct WireDriving {
-        pub component_id: ComponentId,
-        pub next_driving: Index<WireDriving>,
-    }
-
-    impl_linked_list_node!(WireDriving => next_driving);
-
     pub enum WireState {}
     pub enum WireBaseDrive {}
 
@@ -199,7 +190,6 @@ mod private {
         pub state_offset: Offset<WireState>,
         pub drive_offset: Offset<WireBaseDrive>,
         pub first_driver: Index<WireDriver>,
-        pub first_driving: Index<WireDriving>,
     }
 
     impl Wire {
@@ -216,20 +206,6 @@ mod private {
             linked_list_push(buffer, &mut self.first_driver, new_driver);
             Ok(())
         }
-
-        pub fn add_driving(
-            &mut self,
-            buffer: &mut Buffer<WireDriving, Building>,
-            component_id: ComponentId,
-        ) -> Result<(), AddComponentError> {
-            let new_driving = buffer.push(WireDriving {
-                component_id,
-                next_driving: Index::INVALID,
-            })?;
-
-            linked_list_push(buffer, &mut self.first_driving, new_driving);
-            Ok(())
-        }
     }
 
     pub enum OutputState {}
@@ -239,7 +215,6 @@ mod private {
     pub struct ComponentOutput {
         pub width: u32,
         pub state_offset: Offset<OutputState>,
-        pub wire_id: WireId,
         pub next_output: Index<ComponentOutput>,
     }
 
@@ -331,13 +306,6 @@ mod private {
             &self,
             memory: &mut LogicStateBuffer<Memory, Building>,
         ) -> Result<(Offset<Memory>, u32), AddComponentError>;
-
-        fn add_wire_driving(
-            &self,
-            wires: &mut Buffer<Wire, Building>,
-            wire_driving: &mut Buffer<WireDriving, Building>,
-            component_id: ComponentId,
-        ) -> Result<(), AddComponentError>;
     }
 
     macro_rules! single_output {
@@ -360,7 +328,6 @@ mod private {
                 let output = ComponentOutput {
                     width: output_wire.width,
                     state_offset,
-                    wire_id: self.output,
                     next_output: Index::INVALID,
                 };
 
@@ -414,23 +381,6 @@ mod private {
                 }
 
                 no_memory!();
-
-                fn add_wire_driving(
-                    &self,
-                    wires: &mut Buffer<Wire, Building>,
-                    wire_driving: &mut Buffer<WireDriving, Building>,
-                    component_id: ComponentId,
-                ) -> Result<(), AddComponentError> {
-                    for input in self.inputs {
-                        let input_wire = wires
-                            .get_mut(input.0)
-                            .ok_or(AddComponentError::InvalidWireId)?;
-
-                        input_wire.add_driving(wire_driving, component_id)?;
-                    }
-
-                    Ok(())
-                }
             }
         };
     }
@@ -467,19 +417,6 @@ mod private {
         }
 
         no_memory!();
-
-        fn add_wire_driving(
-            &self,
-            wires: &mut Buffer<Wire, Building>,
-            wire_driving: &mut Buffer<WireDriving, Building>,
-            component_id: ComponentId,
-        ) -> Result<(), AddComponentError> {
-            let input_wire = wires
-                .get_mut(self.input.0)
-                .ok_or(AddComponentError::InvalidWireId)?;
-
-            input_wire.add_driving(wire_driving, component_id)
-        }
     }
 
     impl AddComponentArgs for BufferArgs {
@@ -519,19 +456,6 @@ mod private {
         }
 
         no_memory!();
-
-        fn add_wire_driving(
-            &self,
-            wires: &mut Buffer<Wire, Building>,
-            wire_driving: &mut Buffer<WireDriving, Building>,
-            component_id: ComponentId,
-        ) -> Result<(), AddComponentError> {
-            let input_wire = wires
-                .get_mut(self.input.0)
-                .ok_or(AddComponentError::InvalidWireId)?;
-
-            input_wire.add_driving(wire_driving, component_id)
-        }
     }
 }
 
@@ -587,7 +511,6 @@ pub struct SimulatorBuilder {
     wire_states: LogicStateBuffer<WireState, Building>,
     wire_drives: LogicStateBuffer<WireBaseDrive, Building>,
     wire_drivers: Buffer<WireDriver, Building>,
-    wire_driving: Buffer<WireDriving, Building>,
     wires: Buffer<Wire, Building>,
 
     output_states: LogicStateBuffer<OutputState, Building>,
@@ -612,7 +535,6 @@ impl SimulatorBuilder {
             state_offset,
             drive_offset,
             first_driver: Index::INVALID,
-            first_driving: Index::INVALID,
         };
 
         let wire_index = self.wires.push(wire)?;
@@ -643,10 +565,7 @@ impl SimulatorBuilder {
         };
 
         let component_index = self.components.push(component)?;
-        let component_id = ComponentId(component_index);
-        args.add_wire_driving(&mut self.wires, &mut self.wire_driving, component_id)?;
-
-        Ok(component_id)
+        Ok(ComponentId(component_index))
     }
 
     #[inline]
@@ -655,28 +574,11 @@ impl SimulatorBuilder {
     }
 }
 
-bitflags! {
-    #[derive(Debug, Default, Clone, Copy)]
-    struct ListFlags : u32 {
-        const WIRE_UPDATE_QUEUE_OVERFLOW      = 0x1;
-        const COMPONENT_UPDATE_QUEUE_OVERFLOW = 0x2;
-        const CONFLICT_LIST_OVERFLOW          = 0x4;
-        const COMPONENT_KIND_MISMATCH         = 0x8;
-    }
-}
-
-unsafe impl Zeroable for ListFlags {}
-unsafe impl Pod for ListFlags {}
-
 #[derive(Debug, Default, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct ListData {
-    wire_update_queue_index: u32,
-    wire_update_queue_len: u32,
-    component_update_queue_index: u32,
-    component_update_queue_len: u32,
-    conflict_list_index: u32,
-    flags: ListFlags,
+    changed_count: u32,
+    conflict_list_len: u32,
 }
 
 const WORKGROUP_SIZE: u32 = 64;
@@ -685,20 +587,13 @@ pub struct Simulator {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
-    list_data: ListData,
-    wire_update_queue: Vec<WireId>,
-    component_update_queue: Vec<ComponentId>,
     conflict_list: Vec<WireId>,
-
     list_data_buffer: wgpu::Buffer,
-    wire_update_queue_buffer: wgpu::Buffer,
-    component_update_queue_buffer: wgpu::Buffer,
     conflict_list_buffer: wgpu::Buffer,
 
     wire_states: LogicStateBuffer<WireState, Finalized>,
     wire_drives: LogicStateBuffer<WireBaseDrive, Finalized>,
     wire_drivers: Buffer<WireDriver, Finalized>,
-    wire_driving: Buffer<WireDriving, Finalized>,
     wires: Buffer<Wire, Finalized>,
 
     output_states: LogicStateBuffer<OutputState, Finalized>,
@@ -707,9 +602,7 @@ pub struct Simulator {
     memory: LogicStateBuffer<Memory, Finalized>,
     components: Buffer<Component, Finalized>,
 
-    wire_bind_group: wgpu::BindGroup,
-    component_bind_group: wgpu::BindGroup,
-    list_bind_group: wgpu::BindGroup,
+    bind_group: wgpu::BindGroup,
     wire_shader: wgpu::ShaderModule,
     wire_pipeline: wgpu::ComputePipeline,
     component_shader: wgpu::ShaderModule,
@@ -764,157 +657,58 @@ impl Simulator {
         Ok(result)
     }
 
-    fn write_list_data(&self) {
+    fn reset_list_data(&self) {
         self.queue.write_buffer(
             &self.list_data_buffer,
             0,
-            bytemuck::cast_slice(slice::from_ref(&self.list_data)),
+            bytemuck::bytes_of(&ListData::default()),
         );
     }
 
-    fn read_list_data(&mut self) {
+    fn read_list_data(&mut self) -> ListData {
+        let mut list_data = ListData::default();
+
         gpu::read_buffer::<ListData>(
             &self.list_data_buffer,
-            bytemuck::cast_slice_mut(slice::from_mut(&mut self.list_data)),
+            bytemuck::cast_slice_mut(slice::from_mut(&mut list_data)),
             &self.device,
             &self.queue,
             &mut self.staging_buffer,
         );
+
+        list_data
     }
 
     fn wire_step(&mut self) {
-        loop {
-            let workgroup_count = self
-                .list_data
-                .wire_update_queue_len
-                .div_ceil(WORKGROUP_SIZE);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
 
-            if workgroup_count > 0 {
-                let mut encoder = self.device.create_command_encoder(&Default::default());
-
-                {
-                    let mut pass = encoder.begin_compute_pass(&Default::default());
-                    pass.set_pipeline(&self.wire_pipeline);
-                    pass.set_bind_group(0, &self.wire_bind_group, &[]);
-                    pass.set_bind_group(1, &self.component_bind_group, &[]);
-                    pass.set_bind_group(2, &self.list_bind_group, &[]);
-                    pass.dispatch_workgroups(workgroup_count, 1, 1);
-                }
-
-                self.queue.submit(Some(encoder.finish()));
-            }
-
-            self.read_list_data();
-            let mut rerun = false;
-
-            if self
-                .list_data
-                .flags
-                .contains(ListFlags::COMPONENT_UPDATE_QUEUE_OVERFLOW)
-            {
-                rerun = true;
-                todo!("component update queue overflow");
-            }
-
-            if self
-                .list_data
-                .flags
-                .contains(ListFlags::CONFLICT_LIST_OVERFLOW)
-            {
-                rerun = true;
-                todo!("conflict list overflow");
-            }
-
-            if rerun {
-                self.list_data.component_update_queue_index = 0;
-                self.list_data.conflict_list_index = 0;
-                self.list_data.flags = ListFlags::empty();
-                self.write_list_data();
-            } else {
-                break;
-            }
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.wire_pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.dispatch_workgroups(self.wires.len().div_ceil(WORKGROUP_SIZE), 1, 1);
         }
+
+        self.queue.submit(Some(encoder.finish()));
     }
 
     fn component_step(&mut self) {
-        loop {
-            let workgroup_count = self
-                .list_data
-                .component_update_queue_len
-                .div_ceil(WORKGROUP_SIZE);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
 
-            if workgroup_count > 0 {
-                let mut encoder = self.device.create_command_encoder(&Default::default());
-
-                {
-                    let mut pass = encoder.begin_compute_pass(&Default::default());
-                    pass.set_pipeline(&self.component_pipeline);
-                    pass.set_bind_group(0, &self.wire_bind_group, &[]);
-                    pass.set_bind_group(1, &self.component_bind_group, &[]);
-                    pass.set_bind_group(2, &self.list_bind_group, &[]);
-                    pass.dispatch_workgroups(workgroup_count, 1, 1);
-                }
-
-                self.queue.submit(Some(encoder.finish()));
-            }
-
-            self.read_list_data();
-            let mut rerun = false;
-
-            if self
-                .list_data
-                .flags
-                .contains(ListFlags::WIRE_UPDATE_QUEUE_OVERFLOW)
-            {
-                rerun = true;
-                todo!("wire update queue overflow");
-            }
-
-            if rerun {
-                self.list_data.wire_update_queue_index = 0;
-                self.list_data.flags = ListFlags::empty();
-                self.write_list_data();
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn run_tail(&mut self, mut max_steps: u64) -> SimulationRunResult {
-        while max_steps > 0 {
-            self.list_data = ListData {
-                wire_update_queue_len: self.list_data.wire_update_queue_index,
-                ..Default::default()
-            };
-            self.write_list_data();
-            self.wire_step();
-
-            if self.list_data.component_update_queue_index == 0 {
-                return SimulationRunResult::Ok;
-            }
-
-            self.list_data = ListData {
-                component_update_queue_len: self.list_data.component_update_queue_index,
-                ..Default::default()
-            };
-            self.write_list_data();
-            self.component_step();
-
-            if self.list_data.wire_update_queue_index == 0 {
-                return SimulationRunResult::Ok;
-            }
-
-            max_steps -= 1;
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.component_pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.dispatch_workgroups(self.components.len().div_ceil(WORKGROUP_SIZE), 1, 1);
         }
 
-        SimulationRunResult::MaxStepsReached
+        self.queue.submit(Some(encoder.finish()));
     }
 
-    pub fn run(&mut self, max_steps: u64) -> SimulationRunResult {
+    pub fn run(&mut self, mut max_steps: u64) -> SimulationRunResult {
         self.wire_states.update(&self.queue);
         self.wire_drives.update(&self.queue);
         self.wire_drivers.update(&self.queue);
-        self.wire_driving.update(&self.queue);
         self.wires.update(&self.queue);
 
         self.output_states.update(&self.queue);
@@ -927,43 +721,27 @@ impl Simulator {
         self.output_states_need_sync = true;
         self.memory_needs_sync = true;
 
-        for (src, dst) in self.wires.iter_indices().zip(&mut self.wire_update_queue) {
-            *dst = WireId(src);
+        while max_steps > 0 {
+            self.reset_list_data();
+            self.wire_step();
+            let list_data = self.read_list_data();
+
+            if list_data.changed_count == 0 {
+                return SimulationRunResult::Ok;
+            }
+
+            self.reset_list_data();
+            self.component_step();
+            let list_data = self.read_list_data();
+
+            if list_data.changed_count == 0 {
+                return SimulationRunResult::Ok;
+            }
+
+            max_steps -= 1;
         }
-        self.queue.write_buffer(
-            &self.wire_update_queue_buffer,
-            0,
-            bytemuck::cast_slice(&self.wire_update_queue),
-        );
 
-        self.list_data = ListData {
-            wire_update_queue_len: self.wires.len(),
-            ..Default::default()
-        };
-        self.write_list_data();
-        self.wire_step();
-
-        for (src, dst) in self
-            .components
-            .iter_indices()
-            .zip(&mut self.component_update_queue)
-        {
-            *dst = ComponentId(src);
-        }
-        self.queue.write_buffer(
-            &self.component_update_queue_buffer,
-            0,
-            bytemuck::cast_slice(&self.component_update_queue),
-        );
-
-        self.list_data = ListData {
-            component_update_queue_len: self.components.len(),
-            ..Default::default()
-        };
-        self.write_list_data();
-        self.component_step();
-
-        self.run_tail(max_steps)
+        SimulationRunResult::MaxStepsReached
     }
 
     pub fn reset(&mut self) {

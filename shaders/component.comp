@@ -4,16 +4,7 @@
 #define COMPONENT_STEP
 #include "common.comp"
 
-void enqueue_output(ComponentOutput c_output) {
-    uint update_queue_index = atomicAdd(wire_update_queue_index, 1);
-    if (update_queue_index < wire_update_queue.length()) {
-        wire_update_queue[update_queue_index] = c_output.wire_id;
-    } else {
-        atomicOr(list_flags, LIST_FLAGS_WIRE_UPDATE_QUEUE_OVERFLOW);
-    }
-}
-
-void gate_impl(Component component) {
+bool gate_impl(Component component) {
     LogicStateAtom new_state[MAX_STATE_LEN];
     ComponentOutput c_output = outputs[component.first_output];
 
@@ -85,12 +76,10 @@ void gate_impl(Component component) {
         }
     }
 
-    if (state_changed) {
-        enqueue_output(c_output);
-    }
+    return state_changed;
 }
 
-void not_impl(Component component) {
+bool not_impl(Component component) {
     ComponentOutput c_output = outputs[component.first_output];
     ComponentInput c_input = inputs[component.first_input];
 
@@ -105,25 +94,20 @@ void not_impl(Component component) {
         }
     }
 
-    if (state_changed) {
-        enqueue_output(c_output);
-    }
+    return state_changed;
 }
 
-void buffer_impl(Component component) {
-
+bool buffer_impl(Component component) {
+    return false;
 }
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main() {
-    uint queue_index = atomicAdd(component_update_queue_index, 1);
-    if (queue_index >= component_update_queue_len) {
-        return;
-    }
-
-    uint component_index = component_update_queue[queue_index];
+    uint component_index = gl_GlobalInvocationID.x;
+    if (component_index >= components.length()) return;
     Component component = components[component_index];
 
+    bool state_changed;
     switch (component.kind) {
         case COMPONENT_KIND_AND:
         case COMPONENT_KIND_OR:
@@ -131,19 +115,24 @@ void main() {
         case COMPONENT_KIND_NAND:
         case COMPONENT_KIND_NOR:
         case COMPONENT_KIND_XNOR: {
-            gate_impl(component);
+            state_changed = gate_impl(component);
             break;
         }
         case COMPONENT_KIND_NOT: {
-            not_impl(component);
+            state_changed = not_impl(component);
             break;
         }
         case COMPONENT_KIND_BUFFER: {
-            buffer_impl(component);
+            state_changed = buffer_impl(component);
             break;
         }
         default: {
+            state_changed = false;
             break;
         }
+    }
+
+    if (state_changed) {
+        atomicAdd(changed_count, 1);
     }
 }

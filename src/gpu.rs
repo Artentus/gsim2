@@ -60,9 +60,9 @@ fn create_device() -> Result<(Device, Queue), ()> {
 
     let adapter_limits = adapter.limits();
     let device_limits = Limits {
-        max_bind_groups: 4,
-        max_bindings_per_bind_group: 8,
-        max_storage_buffers_per_shader_stage: 24,
+        max_bind_groups: 2,
+        max_bindings_per_bind_group: 16,
+        max_storage_buffers_per_shader_stage: 16,
 
         max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
         max_compute_invocations_per_workgroup: adapter_limits.max_compute_invocations_per_workgroup,
@@ -86,7 +86,7 @@ fn create_device() -> Result<(Device, Queue), ()> {
     Ok((device, queue))
 }
 
-const WIRE_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
+const BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
     BindGroupLayoutEntry {
         binding: 0,
         visibility: ShaderStages::COMPUTE,
@@ -123,25 +123,12 @@ const WIRE_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: true },
             has_dynamic_offset: false,
-            min_binding_size: BufferSize::new(mem::size_of::<WireDriving>() as u64),
+            min_binding_size: BufferSize::new(mem::size_of::<Wire>() as u64),
         },
         count: None,
     },
     BindGroupLayoutEntry {
         binding: 4,
-        visibility: ShaderStages::COMPUTE,
-        ty: BindingType::Buffer {
-            ty: BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: BufferSize::new(mem::size_of::<Wire>() as u64),
-        },
-        count: None,
-    },
-];
-
-const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
-    BindGroupLayoutEntry {
-        binding: 0,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: false },
@@ -151,7 +138,7 @@ const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         count: None,
     },
     BindGroupLayoutEntry {
-        binding: 1,
+        binding: 5,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: true },
@@ -161,7 +148,7 @@ const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         count: None,
     },
     BindGroupLayoutEntry {
-        binding: 2,
+        binding: 6,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: true },
@@ -171,7 +158,7 @@ const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         count: None,
     },
     BindGroupLayoutEntry {
-        binding: 3,
+        binding: 7,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: false },
@@ -181,7 +168,7 @@ const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         count: None,
     },
     BindGroupLayoutEntry {
-        binding: 4,
+        binding: 8,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: true },
@@ -190,11 +177,8 @@ const COMPONENT_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         },
         count: None,
     },
-];
-
-const LIST_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
     BindGroupLayoutEntry {
-        binding: 0,
+        binding: 9,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: false },
@@ -204,27 +188,7 @@ const LIST_BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
         count: None,
     },
     BindGroupLayoutEntry {
-        binding: 1,
-        visibility: ShaderStages::COMPUTE,
-        ty: BindingType::Buffer {
-            ty: BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: BufferSize::new(mem::size_of::<WireId>() as u64),
-        },
-        count: None,
-    },
-    BindGroupLayoutEntry {
-        binding: 2,
-        visibility: ShaderStages::COMPUTE,
-        ty: BindingType::Buffer {
-            ty: BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: BufferSize::new(mem::size_of::<ComponentId>() as u64),
-        },
-        count: None,
-    },
-    BindGroupLayoutEntry {
-        binding: 3,
+        binding: 10,
         visibility: ShaderStages::COMPUTE,
         ty: BindingType::Buffer {
             ty: BufferBindingType::Storage { read_only: false },
@@ -241,30 +205,12 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
 
     let (device, queue) = create_device()?;
 
-    let list_data = ListData::default();
-    let wire_update_queue = vec![WireId::INVALID; (builder.wires.len() as usize) * 2];
-    let component_update_queue =
-        vec![ComponentId::INVALID; (builder.components.len() as usize) * 2];
     let conflict_list = vec![WireId::INVALID; 256];
 
     let list_data_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(slice::from_ref(&list_data)),
+        contents: bytemuck::cast_slice(slice::from_ref(&ListData::default())),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-    });
-
-    let wire_update_queue_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: (wire_update_queue.len().max(1) * mem::size_of::<WireId>()) as u64,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let component_update_queue_buffer = device.create_buffer(&BufferDescriptor {
-        label: None,
-        size: (component_update_queue.len().max(1) * mem::size_of::<ComponentId>()) as u64,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
     });
 
     let conflict_list_buffer = device.create_buffer(&BufferDescriptor {
@@ -277,7 +223,6 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
     let wire_states = builder.wire_states.build(&device);
     let wire_drives = builder.wire_drives.build(&device);
     let wire_drivers = builder.wire_drivers.build(&device);
-    let wire_driving = builder.wire_driving.build(&device);
     let wires = builder.wires.build(&device);
 
     let output_states = builder.output_states.build(&device);
@@ -286,14 +231,14 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
     let memory = builder.memory.build(&device);
     let components = builder.components.build(&device);
 
-    let wire_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+    let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
-        entries: WIRE_BIND_GROUP_ENTRIES,
+        entries: BIND_GROUP_ENTRIES,
     });
 
-    let wire_bind_group = device.create_bind_group(&BindGroupDescriptor {
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
         label: None,
-        layout: &wire_bind_group_layout,
+        layout: &bind_group_layout,
         entries: &[
             BindGroupEntry {
                 binding: 0,
@@ -309,70 +254,34 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
             },
             BindGroupEntry {
                 binding: 3,
-                resource: wire_driving.binding(),
+                resource: wires.binding(),
             },
             BindGroupEntry {
                 binding: 4,
-                resource: wires.binding(),
-            },
-        ],
-    });
-
-    let component_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: None,
-        entries: COMPONENT_BIND_GROUP_ENTRIES,
-    });
-
-    let component_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &component_bind_group_layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
                 resource: output_states.binding(),
             },
             BindGroupEntry {
-                binding: 1,
+                binding: 5,
                 resource: outputs.binding(),
             },
             BindGroupEntry {
-                binding: 2,
+                binding: 6,
                 resource: inputs.binding(),
             },
             BindGroupEntry {
-                binding: 3,
+                binding: 7,
                 resource: memory.binding(),
             },
             BindGroupEntry {
-                binding: 4,
+                binding: 8,
                 resource: components.binding(),
             },
-        ],
-    });
-
-    let list_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: None,
-        entries: LIST_BIND_GROUP_ENTRIES,
-    });
-
-    let list_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &list_bind_group_layout,
-        entries: &[
             BindGroupEntry {
-                binding: 0,
+                binding: 9,
                 resource: list_data_buffer.as_entire_binding(),
             },
             BindGroupEntry {
-                binding: 1,
-                resource: wire_update_queue_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: component_update_queue_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 3,
+                binding: 10,
                 resource: conflict_list_buffer.as_entire_binding(),
             },
         ],
@@ -380,11 +289,7 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[
-            &wire_bind_group_layout,
-            &component_bind_group_layout,
-            &list_bind_group_layout,
-        ],
+        bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
 
@@ -414,20 +319,13 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         device,
         queue,
 
-        list_data,
-        wire_update_queue,
-        component_update_queue,
         conflict_list,
-
         list_data_buffer,
-        wire_update_queue_buffer,
-        component_update_queue_buffer,
         conflict_list_buffer,
 
         wire_states,
         wire_drives,
         wire_drivers,
-        wire_driving,
         wires,
 
         output_states,
@@ -436,9 +334,7 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         memory,
         components,
 
-        wire_bind_group,
-        component_bind_group,
-        list_bind_group,
+        bind_group,
         wire_shader,
         wire_pipeline,
         component_shader,

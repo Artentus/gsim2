@@ -4,38 +4,17 @@
 #define WIRE_STEP
 #include "common.comp"
 
-void enqueue_driving(Wire wire) {
-    uint next_driving = wire.first_driving;
-    while (next_driving != INVALID_INDEX) {
-        WireDriving driving = wire_driving[next_driving];
-        next_driving = driving.next_driving;
-
-        uint update_queue_index = atomicAdd(component_update_queue_index, 1);
-        if (update_queue_index < component_update_queue.length()) {
-            component_update_queue[update_queue_index] = driving.component_id;
-        } else {
-            atomicOr(list_flags, LIST_FLAGS_COMPONENT_UPDATE_QUEUE_OVERFLOW);
-        }
-    }
-}
-
 void mark_conflict(uint wire_index) {
-    uint list_index = atomicAdd(conflict_list_index, 1);
+    uint list_index = atomicAdd(conflict_list_len, 1);
     if (list_index < conflict_list.length()) {
         conflict_list[list_index] = wire_index;
-    } else {
-        atomicOr(list_flags, LIST_FLAGS_CONFLICT_LIST_OVERFLOW);
     }
 }
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main() {
-    uint queue_index = atomicAdd(wire_update_queue_index, 1);
-    if (queue_index >= wire_update_queue_len) {
-        return;
-    }
-
-    uint wire_index = wire_update_queue[queue_index];
+    uint wire_index = gl_GlobalInvocationID.x;
+    if (wire_index >= wires.length()) return;
     Wire wire = wires[wire_index];
 
     WireStateAtom new_state[MAX_STATE_LEN];
@@ -73,7 +52,7 @@ void main() {
     }
 
     if (state_changed) {
-        enqueue_driving(wire);
+        atomicAdd(changed_count, 1);
     }
 
     if (has_conflict) {

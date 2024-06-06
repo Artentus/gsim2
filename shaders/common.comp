@@ -260,30 +260,19 @@ readonly buffer WireDriverBuffer {
     WireDriver wire_drivers[];
 };
 
-struct WireDriving {
-    uint component_id;
-    uint next_driving;
-};
-
-layout(std430, set = 0, binding = 3)
-readonly buffer WireDrivingBuffer {
-    WireDriving wire_driving[];
-};
-
 struct Wire {
     uint width;
     uint state_offset;
     uint drive_offset;
     uint first_driver;
-    uint first_driving;
 };
 
-layout(std430, set = 0, binding = 4)
+layout(std430, set = 0, binding = 3)
 readonly buffer WireBuffer {
     Wire wires[];
 };
 
-layout(std430, set = 1, binding = 0)
+layout(std430, set = 0, binding = 4)
 #ifndef COMPONENT_STEP
 readonly
 #endif
@@ -294,11 +283,10 @@ buffer OutputStateBuffer {
 struct ComponentOutput {
     uint width;
     uint state_offset;
-    uint wire_id;
     uint next_output;
 };
 
-layout(std430, set = 1, binding = 1)
+layout(std430, set = 0, binding = 5)
 readonly buffer OutputBuffer {
     ComponentOutput outputs[];
 };
@@ -309,12 +297,12 @@ struct ComponentInput {
     uint next_input;
 };
 
-layout(std430, set = 1, binding = 2)
+layout(std430, set = 0, binding = 6)
 readonly buffer InputBuffer {
     ComponentInput inputs[];
 };
 
-layout(std430, set = 1, binding = 3)
+layout(std430, set = 0, binding = 7)
 #ifndef COMPONENT_STEP
 readonly
 #endif
@@ -361,43 +349,18 @@ struct Component {
     uint memory_size;
 };
 
-layout(std430, set = 1, binding = 4)
+layout(std430, set = 0, binding = 8)
 readonly buffer ComponentBuffer {
     Component components[];
 };
 
-#define LIST_FLAGS_WIRE_UPDATE_QUEUE_OVERFLOW      0x1
-#define LIST_FLAGS_COMPONENT_UPDATE_QUEUE_OVERFLOW 0x2
-#define LIST_FLAGS_CONFLICT_LIST_OVERFLOW          0x4
-#define LIST_FLAGS_COMPONENT_KIND_MISMATCH         0x8
-
-layout(std430, set = 2, binding = 0)
+layout(std430, set = 0, binding = 9)
 buffer ListDataBuffer {
-    uint wire_update_queue_index;
-    uint wire_update_queue_len;
-    uint component_update_queue_index;
-    uint component_update_queue_len;
-    uint conflict_list_index;
-    uint list_flags;
+    uint changed_count;
+    uint conflict_list_len;
 };
 
-layout(std430, set = 2, binding = 1)
-#ifndef COMPONENT_STEP
-readonly
-#endif
-buffer WireUpdateQueueBuffer {
-    uint wire_update_queue[];
-};
-
-layout(std430, set = 2, binding = 2)
-#ifndef WIRE_STEP
-readonly
-#endif
-buffer ComponentUpdateQueueBuffer {
-    uint component_update_queue[];
-};
-
-layout(std430, set = 2, binding = 3)
+layout(std430, set = 0, binding = 10)
 #ifndef WIRE_STEP
 readonly
 #endif
