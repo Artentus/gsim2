@@ -1,18 +1,18 @@
 struct LogicStateAtom {
-    uint state;
-    uint valid;
-};
+    state: u32,
+    valid: u32,
+}
 
-bool logic_state_equal(LogicStateAtom a, LogicStateAtom b) {
+fn logic_state_equal(a: LogicStateAtom, b: LogicStateAtom) -> bool {
     return (a.state == b.state) && (a.valid == b.valid);
 }
 
-#define HIGH_Z    LogicStateAtom(0x00000000, 0x00000000)
-#define UNDEFINED LogicStateAtom(0xFFFFFFFF, 0x00000000)
-#define LOGIC_0   LogicStateAtom(0x00000000, 0xFFFFFFFF)
-#define LOGIC_1   LogicStateAtom(0xFFFFFFFF, 0xFFFFFFFF)
+const HIGH_Z    = LogicStateAtom(0x00000000u, 0x00000000u);
+const UNDEFINED = LogicStateAtom(0xFFFFFFFFu, 0x00000000u);
+const LOGIC_0   = LogicStateAtom(0x00000000u, 0xFFFFFFFFu);
+const LOGIC_1   = LogicStateAtom(0xFFFFFFFFu, 0xFFFFFFFFu);
 
-LogicStateAtom logic_and(LogicStateAtom a, LogicStateAtom b) {
+fn logic_and(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -32,19 +32,19 @@ LogicStateAtom logic_and(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
 
-    uint state = ( a.state &  b.state)
+    let state = ( a.state &  b.state)
               | (~a.valid & ~b.valid)
               | ( a.state & ~b.valid)
               | ( b.state & ~a.valid);
 
-    uint valid = ( a.valid & b.valid)
+    let valid = ( a.valid & b.valid)
               | (~a.state & a.valid)
               | (~b.state & b.valid);
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_or(LogicStateAtom a, LogicStateAtom b) {
+fn logic_or(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -64,16 +64,16 @@ LogicStateAtom logic_or(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
 
-    uint state = a.state | ~a.valid | b.state | ~b.valid;
+    let state = a.state | ~a.valid | b.state | ~b.valid;
 
-    uint valid = (a.state & a.valid)
+    let valid = (a.state & a.valid)
               | (b.state & b.valid)
               | (a.valid & b.valid);
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_xor(LogicStateAtom a, LogicStateAtom b) {
+fn logic_xor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -93,13 +93,13 @@ LogicStateAtom logic_xor(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
 
-    uint state = (a.state ^ b.state) | ~a.valid | ~b.valid;
-    uint valid = a.valid & b.valid;
+    let state = (a.state ^ b.state) | ~a.valid | ~b.valid;
+    let valid = a.valid & b.valid;
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_nand(LogicStateAtom a, LogicStateAtom b) {
+fn logic_nand(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -119,16 +119,16 @@ LogicStateAtom logic_nand(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
 
-    uint state = ~a.state | ~a.valid | ~b.state | ~b.valid;
+    let state = ~a.state | ~a.valid | ~b.state | ~b.valid;
 
-    uint valid = ( a.valid & b.valid)
+    let valid = ( a.valid & b.valid)
               | (~a.state & a.valid)
               | (~b.state & b.valid);
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_nor(LogicStateAtom a, LogicStateAtom b) {
+fn logic_nor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -148,19 +148,19 @@ LogicStateAtom logic_nor(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
 
-    uint state = (~a.state & ~b.state)
+    let state = (~a.state & ~b.state)
               | (~a.valid & ~b.valid)
               | (~a.state & ~b.valid)
               | (~b.state & ~a.valid);
 
-    uint valid = (a.state & a.valid)
+    let valid = (a.state & a.valid)
               | (b.state & b.valid)
               | (a.valid & b.valid);
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_xnor(LogicStateAtom a, LogicStateAtom b) {
+fn logic_xnor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -180,13 +180,13 @@ LogicStateAtom logic_xnor(LogicStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
 
-    uint state = ~(a.state ^ b.state) | ~a.valid | ~b.valid;
-    uint valid = a.valid & b.valid;
+    let state = ~(a.state ^ b.state) | ~a.valid | ~b.valid;
+    let valid = a.valid & b.valid;
 
     return LogicStateAtom(state, valid);
 }
 
-LogicStateAtom logic_not(LogicStateAtom v) {
+fn logic_not(v: LogicStateAtom) -> LogicStateAtom {
     //  I state | I valid | I meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------
     //     0    |    0    | High-Z    |    1    |    0    | Undefined
@@ -198,11 +198,11 @@ LogicStateAtom logic_not(LogicStateAtom v) {
 }
 
 struct WireStateAtom {
-    LogicStateAtom state;
-    uint conflict;
+    state: LogicStateAtom,
+    conflict: u32,
 };
 
-WireStateAtom combine_state(WireStateAtom a, LogicStateAtom b) {
+fn combine_state(a: WireStateAtom, b: LogicStateAtom) -> WireStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning | conflict
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------|----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    0    |    0    | High-Z    | no
@@ -222,10 +222,10 @@ WireStateAtom combine_state(WireStateAtom a, LogicStateAtom b) {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
 
-    uint state = a.state.state | b.state;
-    uint valid = a.state.valid | b.valid;
+    let state = a.state.state | b.state;
+    let valid = a.state.valid | b.valid;
 
-    uint conflict = a.conflict
+    let conflict = a.conflict
                  | (a.state.state & b.state)
                  | (a.state.state & b.valid)
                  | (a.state.valid & b.state)
@@ -234,147 +234,114 @@ WireStateAtom combine_state(WireStateAtom a, LogicStateAtom b) {
     return WireStateAtom(LogicStateAtom(state, valid), conflict);
 }
 
-#define MAX_STATE_LEN 8
-#define INVALID_INDEX 0xFFFFFFFF
+const MAX_STATE_LEN = 8u;
+const INVALID_INDEX = 0xFFFFFFFFu;
 
-layout(std430, set = 0, binding = 0)
-#ifndef WIRE_STEP
-readonly
-#endif
-buffer WireStateBuffer {
-    LogicStateAtom wire_states[];
-};
+@group(0) @binding(0) 
+var<storage, read_write> wire_states: array<LogicStateAtom>;
 
-layout(std430, set = 0, binding = 1)
-readonly buffer WireBaseDriveBuffer {
-    LogicStateAtom wire_drives[];
-};
+@group(0) @binding(1) 
+var<storage> wire_drives: array<LogicStateAtom>;
 
 struct WireDriver {
-    uint width;
-    uint output_state_offset;
-    uint next_driver;
-};
+    width: u32,
+    output_state_offset: u32,
+    next_driver: u32,
+}
 
-layout(std430, set = 0, binding = 2)
-readonly buffer WireDriverBuffer {
-    WireDriver wire_drivers[];
-};
+@group(0) @binding(2) 
+var<storage> wire_drivers: array<WireDriver>;
 
 struct Wire {
-    uint width;
-    uint state_offset;
-    uint drive_offset;
-    uint first_driver_width;
-    uint first_driver_offset;
-    uint driver_list;
-};
+    width: u32,
+    state_offset: u32,
+    drive_offset: u32,
+    first_driver_width: u32,
+    first_driver_offset: u32,
+    driver_list: u32,
+}
 
-layout(std430, set = 0, binding = 3)
-readonly buffer WireBuffer {
-    Wire wires[];
-};
+@group(0) @binding(3) 
+var<storage> wires: array<Wire>;
 
-layout(std430, set = 0, binding = 4)
-#ifndef COMPONENT_STEP
-readonly
-#endif
-buffer OutputStateBuffer {
-    LogicStateAtom output_states[];
-};
+@group(0) @binding(4) 
+var<storage, read_write> output_states: array<LogicStateAtom>;
 
 struct ComponentOutput {
-    uint width;
-    uint state_offset;
-};
+    width: u32,
+    state_offset: u32,
+}
 
-layout(std430, set = 0, binding = 5)
-readonly buffer OutputBuffer {
-    ComponentOutput outputs[];
-};
+@group(0) @binding(5) 
+var<storage> outputs: array<ComponentOutput>;
 
 struct ComponentInput {
-    uint width;
-    uint wire_state_offset;
-};
+    width: u32,
+    wire_state_offset: u32,
+}
 
-layout(std430, set = 0, binding = 6)
-readonly buffer InputBuffer {
-    ComponentInput inputs[];
-};
+@group(0) @binding(6) 
+var<storage> inputs: array<ComponentInput>;
 
-layout(std430, set = 0, binding = 7)
-#ifndef COMPONENT_STEP
-readonly
-#endif
-buffer MemoryBuffer {
-    LogicStateAtom memory[];
-};
+@group(0) @binding(7) 
+var<storage, read_write> memory: array<LogicStateAtom>;
 
-#define COMPONENT_KIND_AND     0
-#define COMPONENT_KIND_OR      1
-#define COMPONENT_KIND_XOR     2
-#define COMPONENT_KIND_NAND    3
-#define COMPONENT_KIND_NOR     4
-#define COMPONENT_KIND_XNOR    5
-#define COMPONENT_KIND_NOT     6
-#define COMPONENT_KIND_BUFFER  7
-#define COMPONENT_KIND_ADD     8
-#define COMPONENT_KIND_SUB     9
-#define COMPONENT_KIND_NEG    10
-#define COMPONENT_KIND_LSH    11
-#define COMPONENT_KIND_LRSH   12
-#define COMPONENT_KIND_ARSH   13
-#define COMPONENT_KIND_HAND   14
-#define COMPONENT_KIND_HOR    15
-#define COMPONENT_KIND_HXOR   16
-#define COMPONENT_KIND_HNAND  17
-#define COMPONENT_KIND_HNOR   18
-#define COMPONENT_KIND_HXNOR  19
-#define COMPONENT_KIND_CMPEQ  20
-#define COMPONENT_KIND_CMPNE  21
-#define COMPONENT_KIND_CMPULT 22
-#define COMPONENT_KIND_CMPUGT 23
-#define COMPONENT_KIND_CMPULE 24
-#define COMPONENT_KIND_CMPUGE 25
-#define COMPONENT_KIND_CMPSLT 26
-#define COMPONENT_KIND_CMPSGT 27
-#define COMPONENT_KIND_CMPSLE 28
-#define COMPONENT_KIND_CMPSGE 29
+const COMPONENT_KIND_AND    =  0u;
+const COMPONENT_KIND_OR     =  1u;
+const COMPONENT_KIND_XOR    =  2u;
+const COMPONENT_KIND_NAND   =  3u;
+const COMPONENT_KIND_NOR    =  4u;
+const COMPONENT_KIND_XNOR   =  5u;
+const COMPONENT_KIND_NOT    =  6u;
+const COMPONENT_KIND_BUFFER =  7u;
+const COMPONENT_KIND_ADD    =  8u;
+const COMPONENT_KIND_SUB    =  9u;
+const COMPONENT_KIND_NEG    = 10u;
+const COMPONENT_KIND_LSH    = 11u;
+const COMPONENT_KIND_LRSH   = 12u;
+const COMPONENT_KIND_ARSH   = 13u;
+const COMPONENT_KIND_HAND   = 14u;
+const COMPONENT_KIND_HOR    = 15u;
+const COMPONENT_KIND_HXOR   = 16u;
+const COMPONENT_KIND_HNAND  = 17u;
+const COMPONENT_KIND_HNOR   = 18u;
+const COMPONENT_KIND_HXNOR  = 19u;
+const COMPONENT_KIND_CMPEQ  = 20u;
+const COMPONENT_KIND_CMPNE  = 21u;
+const COMPONENT_KIND_CMPULT = 22u;
+const COMPONENT_KIND_CMPUGT = 23u;
+const COMPONENT_KIND_CMPULE = 24u;
+const COMPONENT_KIND_CMPUGE = 25u;
+const COMPONENT_KIND_CMPSLT = 26u;
+const COMPONENT_KIND_CMPSGT = 27u;
+const COMPONENT_KIND_CMPSLE = 28u;
+const COMPONENT_KIND_CMPSGE = 29u;
 
 struct Component {
-    uint kind;
-    uint first_output;
-    uint output_count;
-    uint first_input;
-    uint input_count;
-    uint memory_offset;
-    uint memory_size;
-};
+    kind: u32,
+    first_output: u32,
+    output_count: u32,
+    first_input: u32,
+    input_count: u32,
+    memory_offset: u32,
+    memory_size: u32,
+}
 
-layout(std430, set = 0, binding = 8)
-readonly buffer ComponentBuffer {
-    Component components[];
-};
+@group(0) @binding(8) 
+var<storage> components: array<Component>;
 
-#define WIRE_STATES_CHANGED      0x1
-#define COMPONENT_STATES_CHANGED 0x2
+const WIRE_STATES_CHANGED      = 0x1u;
+const COMPONENT_STATES_CHANGED = 0x2u;
 
-layout(std430, set = 0, binding = 9)
-buffer ListDataBuffer {
-    uint changed;
-    uint conflict_list_len;
-};
+struct ListData {
+    changed: atomic<u32>,
+    conflict_list_len: atomic<u32>,
+}
 
-layout(std430, set = 0, binding = 10)
-#ifndef WIRE_STEP
-readonly
-#endif
-buffer ConflictListBuffer {
-    uint conflict_list[];
-};
+@group(0) @binding(9) 
+var<storage, read_write> list_data: ListData;
 
-layout(std430, push_constant)
-uniform ResetState {
-    uint reset_changed;
-};
+@group(0) @binding(10) 
+var<storage, read_write> conflict_list: array<u32>;
+
+var<push_constant> reset_changed: u32;

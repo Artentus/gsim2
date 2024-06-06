@@ -47,7 +47,7 @@ pub fn read_buffer<T: Pod>(
 
 fn create_device() -> Result<(Device, Queue), ()> {
     let instance_desc = InstanceDescriptor {
-        backends: Backends::VULKAN,
+        backends: Backends::VULKAN | Backends::METAL,
         ..Default::default()
     };
     let instance = Instance::new(instance_desc);
@@ -78,7 +78,7 @@ fn create_device() -> Result<(Device, Queue), ()> {
 
     let device_desc = DeviceDescriptor {
         required_limits: device_limits,
-        required_features: Features::SPIRV_SHADER_PASSTHROUGH | Features::PUSH_CONSTANTS,
+        required_features: Features::PUSH_CONSTANTS,
         ..Default::default()
     };
     let (device, queue) =
@@ -200,6 +200,21 @@ const BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
     },
 ];
 
+const COMMON_SHADER_SOURCE: &str = include_str!("../shaders/common.wgsl");
+
+macro_rules! include_shader {
+    ($name:literal) => {{
+        const SHADER_SOURCE: &str = include_str!(concat!("../shaders/", $name));
+        const FULL_SHADER_SOURCE: &str =
+            const_format::concatcp!(COMMON_SHADER_SOURCE, SHADER_SOURCE);
+
+        ShaderModuleDescriptor {
+            label: Some($name),
+            source: ShaderSource::Wgsl(FULL_SHADER_SOURCE.into()),
+        }
+    }};
+}
+
 pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
     use wgpu::util::{BufferInitDescriptor, DeviceExt};
     use wgpu::*;
@@ -295,8 +310,8 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         }],
     });
 
-    let wire_shader_desc = include_spirv_raw!("../shaders/wire.spv");
-    let wire_shader = unsafe { device.create_shader_module_spirv(&wire_shader_desc) };
+    let wire_shader_desc = include_shader!("wire.wgsl");
+    let wire_shader = device.create_shader_module(wire_shader_desc);
 
     let wire_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: None,
@@ -306,8 +321,8 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         compilation_options: Default::default(),
     });
 
-    let component_shader_desc = include_spirv_raw!("../shaders/component.spv");
-    let component_shader = unsafe { device.create_shader_module_spirv(&component_shader_desc) };
+    let component_shader_desc = include_shader!("component.wgsl");
+    let component_shader = device.create_shader_module(component_shader_desc);
 
     let component_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: None,
@@ -317,8 +332,8 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         compilation_options: Default::default(),
     });
 
-    let reset_shader_desc = include_spirv_raw!("../shaders/reset.spv");
-    let reset_shader = unsafe { device.create_shader_module_spirv(&reset_shader_desc) };
+    let reset_shader_desc = include_shader!("reset.wgsl");
+    let reset_shader = device.create_shader_module(reset_shader_desc);
 
     let reset_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: None,
