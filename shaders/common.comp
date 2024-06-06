@@ -357,9 +357,12 @@ readonly buffer ComponentBuffer {
     Component components[];
 };
 
+#define WIRE_STATES_CHANGED      0x1
+#define COMPONENT_STATES_CHANGED 0x2
+
 layout(std430, set = 0, binding = 9)
 buffer ListDataBuffer {
-    uint changed_count;
+    uint changed;
     uint conflict_list_len;
 };
 
@@ -369,4 +372,9 @@ readonly
 #endif
 buffer ConflictListBuffer {
     uint conflict_list[];
+};
+
+layout(std430, push_constant)
+uniform ResetState {
+    uint reset_changed;
 };

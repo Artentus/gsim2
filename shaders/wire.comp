@@ -13,6 +13,8 @@ void mark_conflict(uint wire_index) {
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main() {
+    if (((changed & COMPONENT_STATES_CHANGED) == 0) || (conflict_list_len > 0)) return;
+
     uint wire_index = gl_GlobalInvocationID.x;
     if (wire_index >= wires.length()) return;
     Wire wire = wires[wire_index];
@@ -61,7 +63,7 @@ void main() {
     }
 
     if (state_changed) {
-        atomicAdd(changed_count, 1);
+        atomicOr(changed, WIRE_STATES_CHANGED);
     }
 
     if (has_conflict) {

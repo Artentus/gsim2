@@ -85,7 +85,14 @@ bool not_impl(Component component) {
     for (uint bit_index = 0; bit_index < c_output.width; bit_index += 32) {
         uint index = bit_index / 32;
 
-        LogicStateAtom atom = logic_not(wire_states[c_input.wire_state_offset + index]);
+        LogicStateAtom atom;
+        if (bit_index < c_input.width) {
+            atom = wire_states[c_input.wire_state_offset + index];
+        } else {
+            atom = HIGH_Z;
+        }
+        atom = logic_not(atom);
+
         if (!logic_state_equal(output_states[c_output.state_offset + index], atom)) {
             output_states[c_output.state_offset + index] = atom;
             state_changed = true;
@@ -96,11 +103,40 @@ bool not_impl(Component component) {
 }
 
 bool buffer_impl(Component component) {
-    return false;
+    ComponentOutput c_output = outputs[component.first_output];
+    ComponentInput c_input = inputs[component.first_input];
+    ComponentInput c_enable = inputs[component.first_output + 1];
+
+    LogicStateAtom enable = wire_states[c_enable.wire_state_offset];
+    bool enable_state = (enable.state & 0x1) > 0;
+    bool enable_valid = (enable.valid & 0x1) > 0;
+
+    bool state_changed = false;
+    for (uint bit_index = 0; bit_index < c_output.width; bit_index += 32) {
+        uint index = bit_index / 32;
+
+        LogicStateAtom atom;
+        if (!enable_valid) {
+            atom = UNDEFINED;
+        } else if ((enable_state) && (bit_index < c_input.width)) {
+            atom = wire_states[c_input.wire_state_offset + index];
+        } else {
+            atom = HIGH_Z;
+        }
+
+        if (!logic_state_equal(output_states[c_output.state_offset + index], atom)) {
+            output_states[c_output.state_offset + index] = atom;
+            state_changed = true;
+        }
+    }
+
+    return state_changed;
 }
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main() {
+    if (((changed & WIRE_STATES_CHANGED) == 0) || (conflict_list_len > 0)) return;
+
     uint component_index = gl_GlobalInvocationID.x;
     if (component_index >= components.length()) return;
     Component component = components[component_index];
@@ -131,6 +167,6 @@ void main() {
     }
 
     if (state_changed) {
-        atomicAdd(changed_count, 1);
+        atomicOr(changed, COMPONENT_STATES_CHANGED);
     }
 }

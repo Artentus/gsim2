@@ -47,7 +47,7 @@ pub fn read_buffer<T: Pod>(
 
 fn create_device() -> Result<(Device, Queue), ()> {
     let instance_desc = InstanceDescriptor {
-        backends: Backends::PRIMARY,
+        backends: Backends::VULKAN,
         ..Default::default()
     };
     let instance = Instance::new(instance_desc);
@@ -63,6 +63,7 @@ fn create_device() -> Result<(Device, Queue), ()> {
         max_bind_groups: 2,
         max_bindings_per_bind_group: 16,
         max_storage_buffers_per_shader_stage: 16,
+        max_push_constant_size: 128,
 
         max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
         max_compute_invocations_per_workgroup: adapter_limits.max_compute_invocations_per_workgroup,
@@ -77,7 +78,7 @@ fn create_device() -> Result<(Device, Queue), ()> {
 
     let device_desc = DeviceDescriptor {
         required_limits: device_limits,
-        required_features: Features::SPIRV_SHADER_PASSTHROUGH,
+        required_features: Features::SPIRV_SHADER_PASSTHROUGH | Features::PUSH_CONSTANTS,
         ..Default::default()
     };
     let (device, queue) =
@@ -205,17 +206,15 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
 
     let (device, queue) = create_device()?;
 
-    let conflict_list = vec![WireId::INVALID; 256];
-
     let list_data_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(slice::from_ref(&ListData::default())),
+        contents: bytemuck::cast_slice(slice::from_ref(&ListData::zeroed())),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
     });
 
     let conflict_list_buffer = device.create_buffer(&BufferDescriptor {
         label: None,
-        size: (conflict_list.len().max(1) * mem::size_of::<WireId>()) as u64,
+        size: (256 * mem::size_of::<WireId>()) as u64,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
@@ -290,7 +289,10 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
         label: None,
         bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
+        push_constant_ranges: &[PushConstantRange {
+            stages: ShaderStages::COMPUTE,
+            range: 0..4,
+        }],
     });
 
     let wire_shader_desc = include_spirv_raw!("../shaders/wire.spv");
@@ -315,11 +317,21 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         compilation_options: Default::default(),
     });
 
+    let reset_shader_desc = include_spirv_raw!("../shaders/reset.spv");
+    let reset_shader = unsafe { device.create_shader_module_spirv(&reset_shader_desc) };
+
+    let reset_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&pipeline_layout),
+        module: &reset_shader,
+        entry_point: "main",
+        compilation_options: Default::default(),
+    });
+
     Ok(Simulator {
         device,
         queue,
 
-        conflict_list,
         list_data_buffer,
         conflict_list_buffer,
 
@@ -335,10 +347,12 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
         components,
 
         bind_group,
-        wire_shader,
+        _wire_shader: wire_shader,
         wire_pipeline,
-        component_shader,
+        _component_shader: component_shader,
         component_pipeline,
+        _reset_shader: reset_shader,
+        reset_pipeline,
 
         staging_buffer: None,
         wire_states_need_sync: false,

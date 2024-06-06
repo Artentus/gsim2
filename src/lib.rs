@@ -3,7 +3,6 @@ mod gpu;
 mod logic;
 mod vec;
 
-use bitflags::bitflags;
 use buffer::*;
 use bytemuck::{Pod, Zeroable};
 use logic::*;
@@ -472,8 +471,11 @@ pub enum SimulationRunResult {
     Ok,
     /// The simulation did not settle within the maximum allowed steps
     MaxStepsReached,
-    ///// The simulation produced an error
-    //Err(SimulationErrors),
+    /// The simulation produced an error
+    Err {
+        /// A list of wires that had more than one driver
+        conflicting_wires: Box<[WireId]>,
+    },
 }
 
 macro_rules! wire_drive_fns {
@@ -583,10 +585,10 @@ impl SimulatorBuilder {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Zeroable, Pod)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct ListData {
-    changed_count: u32,
+    changed: u32,
     conflict_list_len: u32,
 }
 
@@ -596,7 +598,6 @@ pub struct Simulator {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
-    conflict_list: Vec<WireId>,
     list_data_buffer: wgpu::Buffer,
     conflict_list_buffer: wgpu::Buffer,
 
@@ -612,10 +613,12 @@ pub struct Simulator {
     components: Buffer<Component, Finalized>,
 
     bind_group: wgpu::BindGroup,
-    wire_shader: wgpu::ShaderModule,
+    _wire_shader: wgpu::ShaderModule,
     wire_pipeline: wgpu::ComputePipeline,
-    component_shader: wgpu::ShaderModule,
+    _component_shader: wgpu::ShaderModule,
     component_pipeline: wgpu::ComputePipeline,
+    _reset_shader: wgpu::ShaderModule,
+    reset_pipeline: wgpu::ComputePipeline,
 
     staging_buffer: Option<wgpu::Buffer>,
     wire_states_need_sync: bool,
@@ -666,16 +669,8 @@ impl Simulator {
         Ok(result)
     }
 
-    fn reset_list_data(&self) {
-        self.queue.write_buffer(
-            &self.list_data_buffer,
-            0,
-            bytemuck::bytes_of(&ListData::default()),
-        );
-    }
-
     fn read_list_data(&mut self) -> ListData {
-        let mut list_data = ListData::default();
+        let mut list_data = ListData::zeroed();
 
         gpu::read_buffer::<ListData>(
             &self.list_data_buffer,
@@ -688,33 +683,10 @@ impl Simulator {
         list_data
     }
 
-    fn wire_step(&mut self) {
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&self.wire_pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.dispatch_workgroups(self.wires.len().div_ceil(WORKGROUP_SIZE), 1, 1);
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-    }
-
-    fn component_step(&mut self) {
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&self.component_pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.dispatch_workgroups(self.components.len().div_ceil(WORKGROUP_SIZE), 1, 1);
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-    }
-
     pub fn run(&mut self, mut max_steps: u64) -> SimulationRunResult {
+        const WIRE_STATES_CHANGED: u32 = 0x1;
+        const COMPONENT_STATES_CHANGED: u32 = 0x2;
+
         self.wire_states.update(&self.queue);
         self.wire_drives.update(&self.queue);
         self.wire_drivers.update(&self.queue);
@@ -730,24 +702,63 @@ impl Simulator {
         self.output_states_need_sync = true;
         self.memory_needs_sync = true;
 
+        self.queue.write_buffer(
+            &self.list_data_buffer,
+            0,
+            bytemuck::bytes_of(&ListData {
+                changed: WIRE_STATES_CHANGED | COMPONENT_STATES_CHANGED,
+                conflict_list_len: 0,
+            }),
+        );
+
         while max_steps > 0 {
-            self.reset_list_data();
-            self.wire_step();
-            let list_data = self.read_list_data();
+            let mut encoder = self.device.create_command_encoder(&Default::default());
 
-            if list_data.changed_count == 0 {
-                return SimulationRunResult::Ok;
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_bind_group(0, &self.bind_group, &[]);
+
+                for _ in 0..32 {
+                    pass.set_pipeline(&self.reset_pipeline);
+                    pass.set_push_constants(0, bytemuck::bytes_of(&WIRE_STATES_CHANGED));
+                    pass.dispatch_workgroups(1, 1, 1);
+
+                    pass.set_pipeline(&self.wire_pipeline);
+                    pass.dispatch_workgroups(self.wires.len().div_ceil(WORKGROUP_SIZE), 1, 1);
+
+                    pass.set_pipeline(&self.reset_pipeline);
+                    pass.set_push_constants(0, bytemuck::bytes_of(&COMPONENT_STATES_CHANGED));
+                    pass.dispatch_workgroups(1, 1, 1);
+
+                    pass.set_pipeline(&self.component_pipeline);
+                    pass.dispatch_workgroups(self.components.len().div_ceil(WORKGROUP_SIZE), 1, 1);
+
+                    max_steps -= 1;
+                    if max_steps == 0 {
+                        break;
+                    }
+                }
             }
 
-            self.reset_list_data();
-            self.component_step();
-            let list_data = self.read_list_data();
+            self.queue.submit(Some(encoder.finish()));
 
-            if list_data.changed_count == 0 {
+            let list_data = self.read_list_data();
+            if list_data.conflict_list_len > 0 {
+                let mut conflicting_wires =
+                    vec![WireId::INVALID; list_data.conflict_list_len as usize].into_boxed_slice();
+
+                gpu::read_buffer(
+                    &self.conflict_list_buffer,
+                    &mut conflicting_wires,
+                    &self.device,
+                    &self.queue,
+                    &mut self.staging_buffer,
+                );
+
+                return SimulationRunResult::Err { conflicting_wires };
+            } else if list_data.changed == 0 {
                 return SimulationRunResult::Ok;
             }
-
-            max_steps -= 1;
         }
 
         SimulationRunResult::MaxStepsReached
@@ -776,7 +787,8 @@ fn run() {
     let mut sim = builder.build().unwrap();
     sim.set_wire_drive(input_a, &false.into()).unwrap();
     sim.set_wire_drive(input_b, &true.into()).unwrap();
-    assert!(matches!(sim.run(2), SimulationRunResult::Ok));
+    let result = sim.run(3);
+    assert!(matches!(result, SimulationRunResult::Ok), "{result:?}");
 
     let input_a_state = sim.get_wire_state(input_a).unwrap();
     let input_b_state = sim.get_wire_state(input_b).unwrap();
