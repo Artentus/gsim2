@@ -283,7 +283,6 @@ buffer OutputStateBuffer {
 struct ComponentOutput {
     uint width;
     uint state_offset;
-    uint next_output;
 };
 
 layout(std430, set = 0, binding = 5)
@@ -294,7 +293,6 @@ readonly buffer OutputBuffer {
 struct ComponentInput {
     uint width;
     uint wire_state_offset;
-    uint next_input;
 };
 
 layout(std430, set = 0, binding = 6)
@@ -344,7 +342,9 @@ buffer MemoryBuffer {
 struct Component {
     uint kind;
     uint first_output;
+    uint output_count;
     uint first_input;
+    uint input_count;
     uint memory_offset;
     uint memory_size;
 };

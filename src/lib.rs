@@ -215,20 +215,14 @@ mod private {
     pub struct ComponentOutput {
         pub width: u32,
         pub state_offset: Offset<OutputState>,
-        pub next_output: Index<ComponentOutput>,
     }
-
-    impl_linked_list_node!(ComponentOutput => next_output);
 
     #[derive(Debug, Clone, Copy, Zeroable, Pod)]
     #[repr(C)]
     pub struct ComponentInput {
         pub width: u32,
         pub wire_state_offset: Offset<WireState>,
-        pub next_input: Index<ComponentInput>,
     }
-
-    impl_linked_list_node!(ComponentInput => next_input);
 
     #[pod_enum]
     #[derive(Eq, PartialOrd, Ord)]
@@ -280,7 +274,9 @@ mod private {
     pub struct Component {
         pub kind: ComponentKind,
         pub first_output: Index<ComponentOutput>,
+        pub output_count: u32,
         pub first_input: Index<ComponentInput>,
+        pub input_count: u32,
         pub memory_offset: Offset<Memory>,
         pub memory_size: u32,
     }
@@ -294,13 +290,13 @@ mod private {
             wires: &mut Buffer<Wire, Building>,
             output_states: &mut LogicStateBuffer<OutputState, Building>,
             outputs: &mut Buffer<ComponentOutput, Building>,
-        ) -> Result<Index<ComponentOutput>, AddComponentError>;
+        ) -> Result<(Index<ComponentOutput>, u32), AddComponentError>;
 
         fn create_inputs(
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<Index<ComponentInput>, AddComponentError>;
+        ) -> Result<(Index<ComponentInput>, u32), AddComponentError>;
 
         fn create_memory(
             &self,
@@ -316,7 +312,7 @@ mod private {
                 wires: &mut Buffer<Wire, Building>,
                 output_states: &mut LogicStateBuffer<OutputState, Building>,
                 outputs: &mut Buffer<ComponentOutput, Building>,
-            ) -> Result<Index<ComponentOutput>, AddComponentError> {
+            ) -> Result<(Index<ComponentOutput>, u32), AddComponentError> {
                 let output_wire = wires
                     .get_mut(self.output.0)
                     .ok_or(AddComponentError::InvalidWireId)?;
@@ -328,11 +324,10 @@ mod private {
                 let output = ComponentOutput {
                     width: output_wire.width,
                     state_offset,
-                    next_output: Index::INVALID,
                 };
 
                 let output_index = outputs.push(output)?;
-                Ok(output_index)
+                Ok((output_index, 1))
             }
         };
     }
@@ -360,7 +355,7 @@ mod private {
                     &self,
                     wires: &Buffer<Wire, Building>,
                     inputs: &mut Buffer<ComponentInput, Building>,
-                ) -> Result<Index<ComponentInput>, AddComponentError> {
+                ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
                     let mut first_input_index = Index::INVALID;
 
                     for input in self.inputs {
@@ -370,14 +365,15 @@ mod private {
                         let input = ComponentInput {
                             width: input_wire.width,
                             wire_state_offset: input_wire.state_offset,
-                            next_input: Index::INVALID,
                         };
 
                         let input_index = inputs.push(input)?;
-                        linked_list_push(inputs, &mut first_input_index, input_index);
+                        if first_input_index == Index::INVALID {
+                            first_input_index = input_index;
+                        }
                     }
 
-                    Ok(first_input_index)
+                    Ok((first_input_index, self.inputs.len() as u32))
                 }
 
                 no_memory!();
@@ -401,7 +397,7 @@ mod private {
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<Index<ComponentInput>, AddComponentError> {
+        ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
             let input_wire = wires
                 .get(self.input.0)
                 .ok_or(AddComponentError::InvalidWireId)?;
@@ -409,11 +405,10 @@ mod private {
             let input = ComponentInput {
                 width: input_wire.width,
                 wire_state_offset: input_wire.state_offset,
-                next_input: Index::INVALID,
             };
 
             let input_index = inputs.push(input)?;
-            Ok(input_index)
+            Ok((input_index, 1))
         }
 
         no_memory!();
@@ -428,19 +423,7 @@ mod private {
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<Index<ComponentInput>, AddComponentError> {
-            let enable_wire = wires
-                .get(self.enable.0)
-                .ok_or(AddComponentError::InvalidWireId)?;
-
-            let enable = ComponentInput {
-                width: enable_wire.width,
-                wire_state_offset: enable_wire.state_offset,
-                next_input: Index::INVALID,
-            };
-
-            let enable_index = inputs.push(enable)?;
-
+        ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
             let input_wire = wires
                 .get(self.input.0)
                 .ok_or(AddComponentError::InvalidWireId)?;
@@ -448,11 +431,22 @@ mod private {
             let input = ComponentInput {
                 width: input_wire.width,
                 wire_state_offset: input_wire.state_offset,
-                next_input: enable_index,
             };
 
             let input_index = inputs.push(input)?;
-            Ok(input_index)
+
+            let enable_wire = wires
+                .get(self.enable.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            let enable = ComponentInput {
+                width: enable_wire.width,
+                wire_state_offset: enable_wire.state_offset,
+            };
+
+            inputs.push(enable)?;
+
+            Ok((input_index, 2))
         }
 
         no_memory!();
@@ -547,19 +541,21 @@ impl SimulatorBuilder {
         &mut self,
         args: Args,
     ) -> Result<ComponentId, AddComponentError> {
-        let first_output = args.create_outputs(
+        let (first_output, output_count) = args.create_outputs(
             &mut self.wire_drivers,
             &mut self.wires,
             &mut self.output_states,
             &mut self.outputs,
         )?;
-        let first_input = args.create_inputs(&self.wires, &mut self.inputs)?;
+        let (first_input, input_count) = args.create_inputs(&self.wires, &mut self.inputs)?;
         let (memory_offset, memory_size) = args.create_memory(&mut self.memory)?;
 
         let component = Component {
             kind: Args::COMPONENT_KIND,
             first_output,
+            output_count,
             first_input,
+            input_count,
             memory_offset,
             memory_size,
         };

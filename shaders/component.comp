@@ -19,10 +19,8 @@ bool gate_impl(Component component) {
         }
     }
 
-    uint next_input = first_input.next_input;
-    while (next_input != INVALID_INDEX) {
-        ComponentInput c_input = inputs[next_input];
-        next_input = c_input.next_input;
+    for (uint input_index = 0; input_index < component.input_count; input_index++) {
+        ComponentInput c_input = inputs[component.first_input + input_index];
 
         for (uint bit_index = 0; bit_index < c_output.width; bit_index += 32) {
             uint index = bit_index / 32;
