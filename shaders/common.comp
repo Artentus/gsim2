@@ -251,6 +251,7 @@ readonly buffer WireBaseDriveBuffer {
 };
 
 struct WireDriver {
+    uint width;
     uint output_state_offset;
     uint next_driver;
 };
@@ -264,7 +265,9 @@ struct Wire {
     uint width;
     uint state_offset;
     uint drive_offset;
-    uint first_driver;
+    uint first_driver_width;
+    uint first_driver_offset;
+    uint driver_list;
 };
 
 layout(std430, set = 0, binding = 3)

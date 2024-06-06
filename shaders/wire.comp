@@ -23,16 +23,25 @@ void main() {
         new_state[index] = WireStateAtom(wire_drives[wire.drive_offset + index], 0);
     }
 
-    uint next_driver = wire.first_driver;
-    while (next_driver != INVALID_INDEX) {
-        WireDriver driver = wire_drivers[next_driver];
-        next_driver = driver.next_driver;
-
-        for (uint bit_index = 0; bit_index < wire.width; bit_index += 32) {
+    if (wire.first_driver_offset != INVALID_INDEX) {
+        for (uint bit_index = 0; bit_index < min(wire.width, wire.first_driver_width); bit_index += 32) {
             uint index = bit_index / 32;
 
-            LogicStateAtom output_state = output_states[driver.output_state_offset + index];
+            LogicStateAtom output_state = output_states[wire.first_driver_offset + index];
             new_state[index] = combine_state(new_state[index], output_state);
+        }
+
+        uint next_driver = wire.driver_list;
+        while (next_driver != INVALID_INDEX) {
+            WireDriver driver = wire_drivers[next_driver];
+            next_driver = driver.next_driver;
+
+            for (uint bit_index = 0; bit_index < min(wire.width, driver.width); bit_index += 32) {
+                uint index = bit_index / 32;
+
+                LogicStateAtom output_state = output_states[driver.output_state_offset + index];
+                new_state[index] = combine_state(new_state[index], output_state);
+            }
         }
     }
 

@@ -174,6 +174,7 @@ mod private {
     #[derive(Debug, Clone, Copy, Zeroable, Pod)]
     #[repr(C)]
     pub struct WireDriver {
+        pub width: u32,
         pub output_state_offset: Offset<OutputState>,
         pub next_driver: Index<WireDriver>,
     }
@@ -189,21 +190,31 @@ mod private {
         pub width: u32,
         pub state_offset: Offset<WireState>,
         pub drive_offset: Offset<WireBaseDrive>,
-        pub first_driver: Index<WireDriver>,
+        pub first_driver_width: u32,
+        pub first_driver_offset: Offset<OutputState>,
+        pub driver_list: Index<WireDriver>,
     }
 
     impl Wire {
         pub fn add_driver(
             &mut self,
             buffer: &mut Buffer<WireDriver, Building>,
+            width: u32,
             output_state_offset: Offset<OutputState>,
         ) -> Result<(), AddComponentError> {
-            let new_driver = buffer.push(WireDriver {
-                output_state_offset,
-                next_driver: Index::INVALID,
-            })?;
+            if self.first_driver_offset == Offset::INVALID {
+                self.first_driver_width = width;
+                self.first_driver_offset = output_state_offset;
+            } else {
+                let new_driver = buffer.push(WireDriver {
+                    width,
+                    output_state_offset,
+                    next_driver: Index::INVALID,
+                })?;
 
-            linked_list_push(buffer, &mut self.first_driver, new_driver);
+                linked_list_push(buffer, &mut self.driver_list, new_driver);
+            }
+
             Ok(())
         }
     }
@@ -319,7 +330,7 @@ mod private {
 
                 let state_width = output_wire.width.div_ceil(LogicStateAtom::BITS);
                 let state_offset = output_states.push(state_width)?;
-                output_wire.add_driver(wire_drivers, state_offset)?;
+                output_wire.add_driver(wire_drivers, state_width, state_offset)?;
 
                 let output = ComponentOutput {
                     width: output_wire.width,
@@ -528,7 +539,9 @@ impl SimulatorBuilder {
             width,
             state_offset,
             drive_offset,
-            first_driver: Index::INVALID,
+            first_driver_width: 0,
+            first_driver_offset: Offset::INVALID,
+            driver_list: Index::INVALID,
         };
 
         let wire_index = self.wires.push(wire)?;
