@@ -1,0 +1,406 @@
+struct LogicStateAtom {
+    uint state;
+    uint valid;
+};
+
+bool logic_state_equal(LogicStateAtom a, LogicStateAtom b) {
+    return (a.state == b.state) && (a.valid == b.valid);
+}
+
+#define HIGH_Z    LogicStateAtom(0x00000000, 0x00000000)
+#define UNDEFINED LogicStateAtom(0xFFFFFFFF, 0x00000000)
+#define LOGIC_0   LogicStateAtom(0x00000000, 0xFFFFFFFF)
+#define LOGIC_1   LogicStateAtom(0xFFFFFFFF, 0xFFFFFFFF)
+
+LogicStateAtom logic_and(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+
+    uint state = ( a.state &  b.state)
+              | (~a.valid & ~b.valid)
+              | ( a.state & ~b.valid)
+              | ( b.state & ~a.valid);
+
+    uint valid = ( a.valid & b.valid)
+              | (~a.state & a.valid)
+              | (~b.state & b.valid);
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_or(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    1    | Logic 1
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    1    | Logic 1
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+
+    uint state = a.state | ~a.valid | b.state | ~b.valid;
+
+    uint valid = (a.state & a.valid)
+              | (b.state & b.valid)
+              | (a.valid & b.valid);
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_xor(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+
+    uint state = (a.state ^ b.state) | ~a.valid | ~b.valid;
+    uint valid = a.valid & b.valid;
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_nand(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+
+    uint state = ~a.state | ~a.valid | ~b.state | ~b.valid;
+
+    uint valid = ( a.valid & b.valid)
+              | (~a.state & a.valid)
+              | (~b.state & b.valid);
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_nor(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    0    |    1    | Logic 0
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    0    |    1    | Logic 0
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+
+    uint state = (~a.state & ~b.state)
+              | (~a.valid & ~b.valid)
+              | (~a.state & ~b.valid)
+              | (~b.state & ~a.valid);
+
+    uint valid = (a.state & a.valid)
+              | (b.state & b.valid)
+              | (a.valid & b.valid);
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_xnor(LogicStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
+
+    uint state = ~(a.state ^ b.state) | ~a.valid | ~b.valid;
+    uint valid = a.valid & b.valid;
+
+    return LogicStateAtom(state, valid);
+}
+
+LogicStateAtom logic_not(LogicStateAtom v) {
+    //  I state | I valid | I meaning | O state | O valid | O meaning
+    // ---------|---------|-----------|---------|---------|-----------
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined
+    //     1    |    0    | Undefined |    1    |    0    | Undefined
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0
+
+    return LogicStateAtom(~v.state | ~v.valid, v.valid);
+}
+
+struct WireStateAtom {
+    LogicStateAtom state;
+    uint conflict;
+};
+
+WireStateAtom combine_state(WireStateAtom a, LogicStateAtom b) {
+    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning | conflict
+    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------|----------
+    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    0    |    0    | High-Z    | no
+    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined | no
+    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    0    |    1    | Logic 0   | no
+    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    1    | Logic 1   | no
+    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined | no
+    //     1    |    0    | Undefined |    1    |    0    | Undefined |    -    |    -    | -         | yes
+    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    -    |    -    | -         | yes
+    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    -    |    -    | -         | yes
+    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    0    |    1    | Logic 0   | no
+    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    -    |    -    | -         | yes
+    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    -    |    -    | -         | yes
+    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    -    |    -    | -         | yes
+    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    1    | Logic 1   | no
+    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
+    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
+    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
+
+    uint state = a.state.state | b.state;
+    uint valid = a.state.valid | b.valid;
+
+    uint conflict = a.conflict
+                 | (a.state.state & b.state)
+                 | (a.state.state & b.valid)
+                 | (a.state.valid & b.state)
+                 | (a.state.valid & b.valid);
+
+    return WireStateAtom(LogicStateAtom(state, valid), conflict);
+}
+
+#define MAX_STATE_LEN 8
+#define INVALID_INDEX 0xFFFFFFFF
+
+layout(std430, set = 0, binding = 0)
+#ifndef WIRE_STEP
+readonly
+#endif
+buffer WireStateBuffer {
+    LogicStateAtom wire_states[];
+};
+
+layout(std430, set = 0, binding = 1)
+readonly buffer WireBaseDriveBuffer {
+    LogicStateAtom wire_drives[];
+};
+
+struct WireDriver {
+    uint output_state_offset;
+    uint next_driver;
+};
+
+layout(std430, set = 0, binding = 2)
+readonly buffer WireDriverBuffer {
+    WireDriver wire_drivers[];
+};
+
+struct WireDriving {
+    uint component_id;
+    uint next_driving;
+};
+
+layout(std430, set = 0, binding = 3)
+readonly buffer WireDrivingBuffer {
+    WireDriving wire_driving[];
+};
+
+struct Wire {
+    uint width;
+    uint state_offset;
+    uint drive_offset;
+    uint first_driver;
+    uint first_driving;
+};
+
+layout(std430, set = 0, binding = 4)
+readonly buffer WireBuffer {
+    Wire wires[];
+};
+
+layout(std430, set = 1, binding = 0)
+#ifndef COMPONENT_STEP
+readonly
+#endif
+buffer OutputStateBuffer {
+    LogicStateAtom output_states[];
+};
+
+struct ComponentOutput {
+    uint width;
+    uint state_offset;
+    uint wire_id;
+    uint next_output;
+};
+
+layout(std430, set = 1, binding = 1)
+readonly buffer OutputBuffer {
+    ComponentOutput outputs[];
+};
+
+struct ComponentInput {
+    uint width;
+    uint wire_state_offset;
+    uint next_input;
+};
+
+layout(std430, set = 1, binding = 2)
+readonly buffer InputBuffer {
+    ComponentInput inputs[];
+};
+
+layout(std430, set = 1, binding = 3)
+#ifndef COMPONENT_STEP
+readonly
+#endif
+buffer MemoryBuffer {
+    LogicStateAtom memory[];
+};
+
+#define COMPONENT_KIND_AND     0
+#define COMPONENT_KIND_OR      1
+#define COMPONENT_KIND_XOR     2
+#define COMPONENT_KIND_NAND    3
+#define COMPONENT_KIND_NOR     4
+#define COMPONENT_KIND_XNOR    5
+#define COMPONENT_KIND_NOT     6
+#define COMPONENT_KIND_BUFFER  7
+#define COMPONENT_KIND_ADD     8
+#define COMPONENT_KIND_SUB     9
+#define COMPONENT_KIND_NEG    10
+#define COMPONENT_KIND_LSH    11
+#define COMPONENT_KIND_LRSH   12
+#define COMPONENT_KIND_ARSH   13
+#define COMPONENT_KIND_HAND   14
+#define COMPONENT_KIND_HOR    15
+#define COMPONENT_KIND_HXOR   16
+#define COMPONENT_KIND_HNAND  17
+#define COMPONENT_KIND_HNOR   18
+#define COMPONENT_KIND_HXNOR  19
+#define COMPONENT_KIND_CMPEQ  20
+#define COMPONENT_KIND_CMPNE  21
+#define COMPONENT_KIND_CMPULT 22
+#define COMPONENT_KIND_CMPUGT 23
+#define COMPONENT_KIND_CMPULE 24
+#define COMPONENT_KIND_CMPUGE 25
+#define COMPONENT_KIND_CMPSLT 26
+#define COMPONENT_KIND_CMPSGT 27
+#define COMPONENT_KIND_CMPSLE 28
+#define COMPONENT_KIND_CMPSGE 29
+
+struct Component {
+    uint kind;
+    uint first_output;
+    uint first_input;
+    uint memory_offset;
+    uint memory_size;
+};
+
+layout(std430, set = 1, binding = 4)
+readonly buffer ComponentBuffer {
+    Component components[];
+};
+
+#define LIST_FLAGS_WIRE_UPDATE_QUEUE_OVERFLOW      0x1
+#define LIST_FLAGS_COMPONENT_UPDATE_QUEUE_OVERFLOW 0x2
+#define LIST_FLAGS_CONFLICT_LIST_OVERFLOW          0x4
+#define LIST_FLAGS_COMPONENT_KIND_MISMATCH         0x8
+
+layout(std430, set = 2, binding = 0)
+buffer ListDataBuffer {
+    uint wire_update_queue_index;
+    uint wire_update_queue_len;
+    uint component_update_queue_index;
+    uint component_update_queue_len;
+    uint conflict_list_index;
+    uint list_flags;
+};
+
+layout(std430, set = 2, binding = 1)
+#ifndef COMPONENT_STEP
+readonly
+#endif
+buffer WireUpdateQueueBuffer {
+    uint wire_update_queue[];
+};
+
+layout(std430, set = 2, binding = 2)
+#ifndef WIRE_STEP
+readonly
+#endif
+buffer ComponentUpdateQueueBuffer {
+    uint component_update_queue[];
+};
+
+layout(std430, set = 2, binding = 3)
+#ifndef WIRE_STEP
+readonly
+#endif
+buffer ConflictListBuffer {
+    uint conflict_list[];
+};

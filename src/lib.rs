@@ -1,0 +1,1001 @@
+mod buffer;
+mod gpu;
+mod logic;
+mod vec;
+
+use bitflags::bitflags;
+use buffer::*;
+use bytemuck::{Pod, Zeroable};
+use logic::*;
+use private::*;
+use std::slice;
+
+pub use logic::{
+    FromBigIntError, FromBitsError, LogicBitState, LogicState, ParseError, ToIntError,
+};
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Zeroable, Pod)]
+#[repr(transparent)]
+pub struct WireId(Index<Wire>);
+
+impl WireId {
+    pub const INVALID: Self = Self(Index::INVALID);
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Zeroable, Pod)]
+#[repr(transparent)]
+pub struct ComponentId(Index<Component>);
+
+impl ComponentId {
+    pub const INVALID: Self = Self(Index::INVALID);
+}
+
+trait LinkedListNode: Pod + 'static {
+    fn next(&self) -> Index<Self>;
+    fn set_next(&mut self, index: Index<Self>);
+
+    #[inline]
+    fn set_next_checked(&mut self, index: Index<Self>) {
+        assert!(self.next().is_invalid());
+        self.set_next(index);
+    }
+}
+
+macro_rules! impl_linked_list_node {
+    ($t:ty => $next:ident) => {
+        impl LinkedListNode for $t {
+            #[inline]
+            fn next(&self) -> Index<Self> {
+                self.$next
+            }
+
+            #[inline]
+            fn set_next(&mut self, index: Index<Self>) {
+                self.$next = index
+            }
+        }
+    };
+}
+
+fn linked_list_push<T: LinkedListNode>(
+    buffer: &mut Buffer<T, Building>,
+    first_index: &mut Index<T>,
+    index: Index<T>,
+) {
+    let mut prev_index = *first_index;
+    if let Some(first_item) = buffer.get(prev_index) {
+        let mut next_index = first_item.next();
+        while let Some(item) = buffer.get(next_index) {
+            prev_index = next_index;
+            next_index = item.next();
+        }
+
+        buffer.get_mut(prev_index).unwrap().set_next_checked(index);
+    } else {
+        *first_index = index;
+    }
+}
+
+#[inline]
+fn linked_list_iter<'a, T: LinkedListNode, S: BufferState>(
+    buffer: &'a Buffer<T, S>,
+    first_index: Index<T>,
+) -> impl Iterator<Item = &'a T> {
+    struct Iter<'a, T: LinkedListNode, S: BufferState> {
+        buffer: &'a Buffer<T, S>,
+        current: Index<T>,
+    }
+
+    impl<'a, T: LinkedListNode, S: BufferState> Iterator for Iter<'a, T, S> {
+        type Item = &'a T;
+
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            self.buffer
+                .get(self.current)
+                .inspect(|item| self.current = item.next())
+        }
+    }
+
+    Iter {
+        buffer,
+        current: first_index,
+    }
+}
+
+pub const MIN_WIRE_WIDTH: u32 = 1;
+pub const MAX_WIRE_WIDTH: u32 = 256;
+
+#[derive(Debug, Clone)]
+pub enum AddWireError {
+    WidthOutOfRange,
+    OutOfMemory,
+}
+
+impl From<BufferPushError> for AddWireError {
+    fn from(err: BufferPushError) -> Self {
+        match err {
+            BufferPushError::OutOfMemory => AddWireError::OutOfMemory,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidWireIdError;
+
+#[derive(Debug, Clone)]
+pub enum AddComponentError {
+    InvalidWireId,
+    OutOfMemory,
+}
+
+impl From<BufferPushError> for AddComponentError {
+    fn from(err: BufferPushError) -> Self {
+        match err {
+            BufferPushError::OutOfMemory => AddComponentError::OutOfMemory,
+        }
+    }
+}
+
+macro_rules! gate_component_args {
+    ($args:ident) => {
+        #[derive(Debug, Clone)]
+        pub struct $args<'a> {
+            pub inputs: &'a [WireId],
+            pub output: WireId,
+        }
+    };
+}
+
+gate_component_args!(AndGateArgs);
+gate_component_args!(OrGateArgs);
+gate_component_args!(XorGateArgs);
+gate_component_args!(NandGateArgs);
+gate_component_args!(NorGateArgs);
+gate_component_args!(XnorGateArgs);
+
+#[derive(Debug, Clone)]
+pub struct NotGateArgs {
+    pub input: WireId,
+    pub output: WireId,
+}
+
+#[derive(Debug, Clone)]
+pub struct BufferArgs {
+    pub input: WireId,
+    pub enable: WireId,
+    pub output: WireId,
+}
+
+mod private {
+    use super::*;
+    use pod_enum::pod_enum;
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct WireDriver {
+        pub output_state_offset: Offset<OutputState>,
+        pub next_driver: Index<WireDriver>,
+    }
+
+    impl_linked_list_node!(WireDriver => next_driver);
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct WireDriving {
+        pub component_id: ComponentId,
+        pub next_driving: Index<WireDriving>,
+    }
+
+    impl_linked_list_node!(WireDriving => next_driving);
+
+    pub enum WireState {}
+    pub enum WireBaseDrive {}
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct Wire {
+        pub width: u32,
+        pub state_offset: Offset<WireState>,
+        pub drive_offset: Offset<WireBaseDrive>,
+        pub first_driver: Index<WireDriver>,
+        pub first_driving: Index<WireDriving>,
+    }
+
+    impl Wire {
+        pub fn add_driver(
+            &mut self,
+            buffer: &mut Buffer<WireDriver, Building>,
+            output_state_offset: Offset<OutputState>,
+        ) -> Result<(), AddComponentError> {
+            let new_driver = buffer.push(WireDriver {
+                output_state_offset,
+                next_driver: Index::INVALID,
+            })?;
+
+            linked_list_push(buffer, &mut self.first_driver, new_driver);
+            Ok(())
+        }
+
+        pub fn add_driving(
+            &mut self,
+            buffer: &mut Buffer<WireDriving, Building>,
+            component_id: ComponentId,
+        ) -> Result<(), AddComponentError> {
+            let new_driving = buffer.push(WireDriving {
+                component_id,
+                next_driving: Index::INVALID,
+            })?;
+
+            linked_list_push(buffer, &mut self.first_driving, new_driving);
+            Ok(())
+        }
+    }
+
+    pub enum OutputState {}
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct ComponentOutput {
+        pub width: u32,
+        pub state_offset: Offset<OutputState>,
+        pub wire_id: WireId,
+        pub next_output: Index<ComponentOutput>,
+    }
+
+    impl_linked_list_node!(ComponentOutput => next_output);
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct ComponentInput {
+        pub width: u32,
+        pub wire_state_offset: Offset<WireState>,
+        pub next_input: Index<ComponentInput>,
+    }
+
+    impl_linked_list_node!(ComponentInput => next_input);
+
+    #[pod_enum]
+    #[derive(Eq, PartialOrd, Ord)]
+    #[repr(u32)]
+    pub enum ComponentKind {
+        And = 0,
+        Or = 1,
+        Xor = 2,
+        Nand = 3,
+        Nor = 4,
+        Xnor = 5,
+        Not = 6,
+        Buffer = 7,
+        Add = 8,
+        Sub = 9,
+        Neg = 10,
+        Lsh = 11,
+        LRsh = 12,
+        ARsh = 13,
+        HAnd = 14,
+        HOr = 15,
+        HXor = 16,
+        HNand = 17,
+        HNor = 18,
+        HXnor = 19,
+        CmpEq = 20,
+        CmpNe = 21,
+        CmpUlt = 22,
+        CmpUgt = 23,
+        CmpUle = 24,
+        CmpUge = 25,
+        CmpSlt = 26,
+        CmpSgt = 27,
+        CmpSle = 28,
+        CmpSge = 29,
+    }
+
+    impl Default for ComponentKind {
+        #[inline]
+        fn default() -> Self {
+            Self { inner: 0 }
+        }
+    }
+
+    pub enum Memory {}
+
+    #[derive(Debug, Clone, Copy, Zeroable, Pod)]
+    #[repr(C)]
+    pub struct Component {
+        pub kind: ComponentKind,
+        pub first_output: Index<ComponentOutput>,
+        pub first_input: Index<ComponentInput>,
+        pub memory_offset: Offset<Memory>,
+        pub memory_size: u32,
+    }
+
+    pub trait AddComponentArgs {
+        const COMPONENT_KIND: ComponentKind;
+
+        fn create_outputs(
+            &self,
+            wire_drivers: &mut Buffer<WireDriver, Building>,
+            wires: &mut Buffer<Wire, Building>,
+            output_states: &mut LogicStateBuffer<OutputState, Building>,
+            outputs: &mut Buffer<ComponentOutput, Building>,
+        ) -> Result<Index<ComponentOutput>, AddComponentError>;
+
+        fn create_inputs(
+            &self,
+            wires: &Buffer<Wire, Building>,
+            inputs: &mut Buffer<ComponentInput, Building>,
+        ) -> Result<Index<ComponentInput>, AddComponentError>;
+
+        fn create_memory(
+            &self,
+            memory: &mut LogicStateBuffer<Memory, Building>,
+        ) -> Result<(Offset<Memory>, u32), AddComponentError>;
+
+        fn add_wire_driving(
+            &self,
+            wires: &mut Buffer<Wire, Building>,
+            wire_driving: &mut Buffer<WireDriving, Building>,
+            component_id: ComponentId,
+        ) -> Result<(), AddComponentError>;
+    }
+
+    macro_rules! single_output {
+        () => {
+            fn create_outputs(
+                &self,
+                wire_drivers: &mut Buffer<WireDriver, Building>,
+                wires: &mut Buffer<Wire, Building>,
+                output_states: &mut LogicStateBuffer<OutputState, Building>,
+                outputs: &mut Buffer<ComponentOutput, Building>,
+            ) -> Result<Index<ComponentOutput>, AddComponentError> {
+                let output_wire = wires
+                    .get_mut(self.output.0)
+                    .ok_or(AddComponentError::InvalidWireId)?;
+
+                let state_width = output_wire.width.div_ceil(LogicStateAtom::BITS);
+                let state_offset = output_states.push(state_width)?;
+                output_wire.add_driver(wire_drivers, state_offset)?;
+
+                let output = ComponentOutput {
+                    width: output_wire.width,
+                    state_offset,
+                    wire_id: self.output,
+                    next_output: Index::INVALID,
+                };
+
+                let output_index = outputs.push(output)?;
+                Ok(output_index)
+            }
+        };
+    }
+
+    macro_rules! no_memory {
+        () => {
+            #[inline]
+            fn create_memory(
+                &self,
+                _memory: &mut LogicStateBuffer<Memory, Building>,
+            ) -> Result<(Offset<Memory>, u32), AddComponentError> {
+                Ok((Offset::INVALID, 0))
+            }
+        };
+    }
+
+    macro_rules! impl_gate_component_args {
+        ($args:ident => $kind:ident) => {
+            impl AddComponentArgs for $args<'_> {
+                const COMPONENT_KIND: ComponentKind = ComponentKind::$kind;
+
+                single_output!();
+
+                fn create_inputs(
+                    &self,
+                    wires: &Buffer<Wire, Building>,
+                    inputs: &mut Buffer<ComponentInput, Building>,
+                ) -> Result<Index<ComponentInput>, AddComponentError> {
+                    let mut first_input_index = Index::INVALID;
+
+                    for input in self.inputs {
+                        let input_wire =
+                            wires.get(input.0).ok_or(AddComponentError::InvalidWireId)?;
+
+                        let input = ComponentInput {
+                            width: input_wire.width,
+                            wire_state_offset: input_wire.state_offset,
+                            next_input: Index::INVALID,
+                        };
+
+                        let input_index = inputs.push(input)?;
+                        linked_list_push(inputs, &mut first_input_index, input_index);
+                    }
+
+                    Ok(first_input_index)
+                }
+
+                no_memory!();
+
+                fn add_wire_driving(
+                    &self,
+                    wires: &mut Buffer<Wire, Building>,
+                    wire_driving: &mut Buffer<WireDriving, Building>,
+                    component_id: ComponentId,
+                ) -> Result<(), AddComponentError> {
+                    for input in self.inputs {
+                        let input_wire = wires
+                            .get_mut(input.0)
+                            .ok_or(AddComponentError::InvalidWireId)?;
+
+                        input_wire.add_driving(wire_driving, component_id)?;
+                    }
+
+                    Ok(())
+                }
+            }
+        };
+    }
+
+    impl_gate_component_args!(AndGateArgs => And);
+    impl_gate_component_args!(OrGateArgs => Or);
+    impl_gate_component_args!(XorGateArgs => Xor);
+    impl_gate_component_args!(NandGateArgs => Nand);
+    impl_gate_component_args!(NorGateArgs => Nor);
+    impl_gate_component_args!(XnorGateArgs => Xnor);
+
+    impl AddComponentArgs for NotGateArgs {
+        const COMPONENT_KIND: ComponentKind = ComponentKind::Not;
+
+        single_output!();
+
+        fn create_inputs(
+            &self,
+            wires: &Buffer<Wire, Building>,
+            inputs: &mut Buffer<ComponentInput, Building>,
+        ) -> Result<Index<ComponentInput>, AddComponentError> {
+            let input_wire = wires
+                .get(self.input.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            let input = ComponentInput {
+                width: input_wire.width,
+                wire_state_offset: input_wire.state_offset,
+                next_input: Index::INVALID,
+            };
+
+            let input_index = inputs.push(input)?;
+            Ok(input_index)
+        }
+
+        no_memory!();
+
+        fn add_wire_driving(
+            &self,
+            wires: &mut Buffer<Wire, Building>,
+            wire_driving: &mut Buffer<WireDriving, Building>,
+            component_id: ComponentId,
+        ) -> Result<(), AddComponentError> {
+            let input_wire = wires
+                .get_mut(self.input.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            input_wire.add_driving(wire_driving, component_id)
+        }
+    }
+
+    impl AddComponentArgs for BufferArgs {
+        const COMPONENT_KIND: ComponentKind = ComponentKind::Not;
+
+        single_output!();
+
+        fn create_inputs(
+            &self,
+            wires: &Buffer<Wire, Building>,
+            inputs: &mut Buffer<ComponentInput, Building>,
+        ) -> Result<Index<ComponentInput>, AddComponentError> {
+            let enable_wire = wires
+                .get(self.enable.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            let enable = ComponentInput {
+                width: enable_wire.width,
+                wire_state_offset: enable_wire.state_offset,
+                next_input: Index::INVALID,
+            };
+
+            let enable_index = inputs.push(enable)?;
+
+            let input_wire = wires
+                .get(self.input.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            let input = ComponentInput {
+                width: input_wire.width,
+                wire_state_offset: input_wire.state_offset,
+                next_input: enable_index,
+            };
+
+            let input_index = inputs.push(input)?;
+            Ok(input_index)
+        }
+
+        no_memory!();
+
+        fn add_wire_driving(
+            &self,
+            wires: &mut Buffer<Wire, Building>,
+            wire_driving: &mut Buffer<WireDriving, Building>,
+            component_id: ComponentId,
+        ) -> Result<(), AddComponentError> {
+            let input_wire = wires
+                .get_mut(self.input.0)
+                .ok_or(AddComponentError::InvalidWireId)?;
+
+            input_wire.add_driving(wire_driving, component_id)
+        }
+    }
+}
+
+/// The result of running a simulation
+#[derive(Debug, Clone)]
+#[must_use]
+pub enum SimulationRunResult {
+    /// The simulation settled
+    Ok,
+    /// The simulation did not settle within the maximum allowed steps
+    MaxStepsReached,
+    ///// The simulation produced an error
+    //Err(SimulationErrors),
+}
+
+macro_rules! wire_drive_fns {
+    () => {
+        pub fn set_wire_drive(
+            &mut self,
+            wire: WireId,
+            new_drive: &LogicState,
+        ) -> Result<(), InvalidWireIdError> {
+            let wire = self.wires.get(wire.0).ok_or(InvalidWireIdError)?;
+
+            let state_width = wire.width.div_ceil(LogicStateAtom::BITS);
+            let drive = self
+                .wire_drives
+                .get_mut(wire.drive_offset, state_width)
+                .expect("invalid wire drive offset");
+            drive.copy_from_slice(&new_drive.0[..drive.len()]);
+
+            Ok(())
+        }
+
+        pub fn get_wire_drive(&mut self, wire: WireId) -> Result<LogicState, InvalidWireIdError> {
+            let wire = self.wires.get(wire.0).ok_or(InvalidWireIdError)?;
+
+            let state_width = wire.width.div_ceil(LogicStateAtom::BITS);
+            let drive = self
+                .wire_drives
+                .get(wire.drive_offset, state_width)
+                .expect("invalid wire drive offset");
+
+            let mut result = LogicState::HIGH_Z;
+            result.0[..drive.len()].copy_from_slice(drive);
+            Ok(result)
+        }
+    };
+}
+
+#[derive(Debug, Default)]
+pub struct SimulatorBuilder {
+    wire_states: LogicStateBuffer<WireState, Building>,
+    wire_drives: LogicStateBuffer<WireBaseDrive, Building>,
+    wire_drivers: Buffer<WireDriver, Building>,
+    wire_driving: Buffer<WireDriving, Building>,
+    wires: Buffer<Wire, Building>,
+
+    output_states: LogicStateBuffer<OutputState, Building>,
+    outputs: Buffer<ComponentOutput, Building>,
+    inputs: Buffer<ComponentInput, Building>,
+    memory: LogicStateBuffer<Memory, Building>,
+    components: Buffer<Component, Building>,
+}
+
+impl SimulatorBuilder {
+    pub fn add_wire(&mut self, width: u32) -> Result<WireId, AddWireError> {
+        if (width < MIN_WIRE_WIDTH) || (width > MAX_WIRE_WIDTH) {
+            return Err(AddWireError::WidthOutOfRange);
+        }
+
+        let state_width = width.div_ceil(LogicStateAtom::BITS);
+        let state_offset = self.wire_states.push(state_width)?;
+        let drive_offset = self.wire_drives.push(state_width)?;
+
+        let wire = Wire {
+            width,
+            state_offset,
+            drive_offset,
+            first_driver: Index::INVALID,
+            first_driving: Index::INVALID,
+        };
+
+        let wire_index = self.wires.push(wire)?;
+        Ok(WireId(wire_index))
+    }
+
+    wire_drive_fns!();
+
+    pub fn add_component<Args: AddComponentArgs>(
+        &mut self,
+        args: Args,
+    ) -> Result<ComponentId, AddComponentError> {
+        let first_output = args.create_outputs(
+            &mut self.wire_drivers,
+            &mut self.wires,
+            &mut self.output_states,
+            &mut self.outputs,
+        )?;
+        let first_input = args.create_inputs(&self.wires, &mut self.inputs)?;
+        let (memory_offset, memory_size) = args.create_memory(&mut self.memory)?;
+
+        let component = Component {
+            kind: Args::COMPONENT_KIND,
+            first_output,
+            first_input,
+            memory_offset,
+            memory_size,
+        };
+
+        let component_index = self.components.push(component)?;
+        let component_id = ComponentId(component_index);
+        args.add_wire_driving(&mut self.wires, &mut self.wire_driving, component_id)?;
+
+        Ok(component_id)
+    }
+
+    #[inline]
+    pub fn build(self) -> Result<Simulator, ()> {
+        gpu::create_simulator(self)
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Default, Clone, Copy)]
+    struct ListFlags : u32 {
+        const WIRE_UPDATE_QUEUE_OVERFLOW      = 0x1;
+        const COMPONENT_UPDATE_QUEUE_OVERFLOW = 0x2;
+        const CONFLICT_LIST_OVERFLOW          = 0x4;
+        const COMPONENT_KIND_MISMATCH         = 0x8;
+    }
+}
+
+unsafe impl Zeroable for ListFlags {}
+unsafe impl Pod for ListFlags {}
+
+#[derive(Debug, Default, Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+struct ListData {
+    wire_update_queue_index: u32,
+    wire_update_queue_len: u32,
+    component_update_queue_index: u32,
+    component_update_queue_len: u32,
+    conflict_list_index: u32,
+    flags: ListFlags,
+}
+
+const WORKGROUP_SIZE: u32 = 64;
+
+pub struct Simulator {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+
+    list_data: ListData,
+    wire_update_queue: Vec<WireId>,
+    component_update_queue: Vec<ComponentId>,
+    conflict_list: Vec<WireId>,
+
+    list_data_buffer: wgpu::Buffer,
+    wire_update_queue_buffer: wgpu::Buffer,
+    component_update_queue_buffer: wgpu::Buffer,
+    conflict_list_buffer: wgpu::Buffer,
+
+    wire_states: LogicStateBuffer<WireState, Finalized>,
+    wire_drives: LogicStateBuffer<WireBaseDrive, Finalized>,
+    wire_drivers: Buffer<WireDriver, Finalized>,
+    wire_driving: Buffer<WireDriving, Finalized>,
+    wires: Buffer<Wire, Finalized>,
+
+    output_states: LogicStateBuffer<OutputState, Finalized>,
+    outputs: Buffer<ComponentOutput, Finalized>,
+    inputs: Buffer<ComponentInput, Finalized>,
+    memory: LogicStateBuffer<Memory, Finalized>,
+    components: Buffer<Component, Finalized>,
+
+    wire_bind_group: wgpu::BindGroup,
+    component_bind_group: wgpu::BindGroup,
+    list_bind_group: wgpu::BindGroup,
+    wire_shader: wgpu::ShaderModule,
+    wire_pipeline: wgpu::ComputePipeline,
+    component_shader: wgpu::ShaderModule,
+    component_pipeline: wgpu::ComputePipeline,
+
+    staging_buffer: Option<wgpu::Buffer>,
+    wire_states_need_sync: bool,
+    output_states_need_sync: bool,
+    memory_needs_sync: bool,
+}
+
+impl Simulator {
+    fn sync_wire_states(&mut self) {
+        if self.wire_states_need_sync {
+            self.wire_states
+                .sync(&self.device, &self.queue, &mut self.staging_buffer);
+            self.wire_states_need_sync = false;
+        }
+    }
+
+    fn sync_output_states(&mut self) {
+        if self.output_states_need_sync {
+            self.output_states
+                .sync(&self.device, &self.queue, &mut self.staging_buffer);
+            self.output_states_need_sync = false;
+        }
+    }
+
+    fn sync_memory(&mut self) {
+        if self.memory_needs_sync {
+            self.memory
+                .sync(&self.device, &self.queue, &mut self.staging_buffer);
+            self.memory_needs_sync = false;
+        }
+    }
+
+    wire_drive_fns!();
+
+    pub fn get_wire_state(&mut self, wire: WireId) -> Result<LogicState, InvalidWireIdError> {
+        self.sync_wire_states();
+
+        let wire = self.wires.get(wire.0).ok_or(InvalidWireIdError)?;
+
+        let state_width = wire.width.div_ceil(LogicStateAtom::BITS);
+        let state = self
+            .wire_states
+            .get(wire.state_offset, state_width)
+            .expect("invalid wire state offset");
+
+        let mut result = LogicState::HIGH_Z;
+        result.0[..state.len()].copy_from_slice(state);
+        Ok(result)
+    }
+
+    fn write_list_data(&self) {
+        self.queue.write_buffer(
+            &self.list_data_buffer,
+            0,
+            bytemuck::cast_slice(slice::from_ref(&self.list_data)),
+        );
+    }
+
+    fn read_list_data(&mut self) {
+        gpu::read_buffer::<ListData>(
+            &self.list_data_buffer,
+            bytemuck::cast_slice_mut(slice::from_mut(&mut self.list_data)),
+            &self.device,
+            &self.queue,
+            &mut self.staging_buffer,
+        );
+    }
+
+    fn wire_step(&mut self) {
+        loop {
+            let workgroup_count = self
+                .list_data
+                .wire_update_queue_len
+                .div_ceil(WORKGROUP_SIZE);
+
+            if workgroup_count > 0 {
+                let mut encoder = self.device.create_command_encoder(&Default::default());
+
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&self.wire_pipeline);
+                    pass.set_bind_group(0, &self.wire_bind_group, &[]);
+                    pass.set_bind_group(1, &self.component_bind_group, &[]);
+                    pass.set_bind_group(2, &self.list_bind_group, &[]);
+                    pass.dispatch_workgroups(workgroup_count, 1, 1);
+                }
+
+                self.queue.submit(Some(encoder.finish()));
+            }
+
+            self.read_list_data();
+            let mut rerun = false;
+
+            if self
+                .list_data
+                .flags
+                .contains(ListFlags::COMPONENT_UPDATE_QUEUE_OVERFLOW)
+            {
+                rerun = true;
+                todo!("component update queue overflow");
+            }
+
+            if self
+                .list_data
+                .flags
+                .contains(ListFlags::CONFLICT_LIST_OVERFLOW)
+            {
+                rerun = true;
+                todo!("conflict list overflow");
+            }
+
+            if rerun {
+                self.list_data.component_update_queue_index = 0;
+                self.list_data.conflict_list_index = 0;
+                self.list_data.flags = ListFlags::empty();
+                self.write_list_data();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn component_step(&mut self) {
+        loop {
+            let workgroup_count = self
+                .list_data
+                .component_update_queue_len
+                .div_ceil(WORKGROUP_SIZE);
+
+            if workgroup_count > 0 {
+                let mut encoder = self.device.create_command_encoder(&Default::default());
+
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&self.component_pipeline);
+                    pass.set_bind_group(0, &self.wire_bind_group, &[]);
+                    pass.set_bind_group(1, &self.component_bind_group, &[]);
+                    pass.set_bind_group(2, &self.list_bind_group, &[]);
+                    pass.dispatch_workgroups(workgroup_count, 1, 1);
+                }
+
+                self.queue.submit(Some(encoder.finish()));
+            }
+
+            self.read_list_data();
+            let mut rerun = false;
+
+            if self
+                .list_data
+                .flags
+                .contains(ListFlags::WIRE_UPDATE_QUEUE_OVERFLOW)
+            {
+                rerun = true;
+                todo!("wire update queue overflow");
+            }
+
+            if rerun {
+                self.list_data.wire_update_queue_index = 0;
+                self.list_data.flags = ListFlags::empty();
+                self.write_list_data();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn run_tail(&mut self, mut max_steps: u64) -> SimulationRunResult {
+        while max_steps > 0 {
+            self.list_data = ListData {
+                wire_update_queue_len: self.list_data.wire_update_queue_index,
+                ..Default::default()
+            };
+            self.write_list_data();
+            self.wire_step();
+
+            if self.list_data.component_update_queue_index == 0 {
+                return SimulationRunResult::Ok;
+            }
+
+            self.list_data = ListData {
+                component_update_queue_len: self.list_data.component_update_queue_index,
+                ..Default::default()
+            };
+            self.write_list_data();
+            self.component_step();
+
+            if self.list_data.wire_update_queue_index == 0 {
+                return SimulationRunResult::Ok;
+            }
+
+            max_steps -= 1;
+        }
+
+        SimulationRunResult::MaxStepsReached
+    }
+
+    pub fn run(&mut self, max_steps: u64) -> SimulationRunResult {
+        self.wire_states.update(&self.queue);
+        self.wire_drives.update(&self.queue);
+        self.wire_drivers.update(&self.queue);
+        self.wire_driving.update(&self.queue);
+        self.wires.update(&self.queue);
+
+        self.output_states.update(&self.queue);
+        self.outputs.update(&self.queue);
+        self.inputs.update(&self.queue);
+        self.memory.update(&self.queue);
+        self.components.update(&self.queue);
+
+        self.wire_states_need_sync = true;
+        self.output_states_need_sync = true;
+        self.memory_needs_sync = true;
+
+        for (src, dst) in self.wires.iter_indices().zip(&mut self.wire_update_queue) {
+            *dst = WireId(src);
+        }
+        self.queue.write_buffer(
+            &self.wire_update_queue_buffer,
+            0,
+            bytemuck::cast_slice(&self.wire_update_queue),
+        );
+
+        self.list_data = ListData {
+            wire_update_queue_len: self.wires.len(),
+            ..Default::default()
+        };
+        self.write_list_data();
+        self.wire_step();
+
+        for (src, dst) in self
+            .components
+            .iter_indices()
+            .zip(&mut self.component_update_queue)
+        {
+            *dst = ComponentId(src);
+        }
+        self.queue.write_buffer(
+            &self.component_update_queue_buffer,
+            0,
+            bytemuck::cast_slice(&self.component_update_queue),
+        );
+
+        self.list_data = ListData {
+            component_update_queue_len: self.components.len(),
+            ..Default::default()
+        };
+        self.write_list_data();
+        self.component_step();
+
+        self.run_tail(max_steps)
+    }
+
+    pub fn reset(&mut self) {
+        self.wire_states.reset();
+        self.output_states.reset();
+        self.memory.reset();
+    }
+}
+
+#[test]
+fn run() {
+    let mut builder = SimulatorBuilder::default();
+    let input_a = builder.add_wire(1).unwrap();
+    let input_b = builder.add_wire(1).unwrap();
+    let output = builder.add_wire(1).unwrap();
+    let gate = builder
+        .add_component(AndGateArgs {
+            inputs: &[input_a, input_b],
+            output,
+        })
+        .unwrap();
+
+    let mut sim = builder.build().unwrap();
+    sim.set_wire_drive(input_a, &false.into()).unwrap();
+    sim.set_wire_drive(input_b, &true.into()).unwrap();
+    assert!(matches!(sim.run(2), SimulationRunResult::Ok));
+
+    let input_a_state = sim.get_wire_state(input_a).unwrap();
+    let input_b_state = sim.get_wire_state(input_b).unwrap();
+    let output_state = sim.get_wire_state(output).unwrap();
+
+    assert!(input_a_state.eq(&false.into(), 1));
+    assert!(input_b_state.eq(&true.into(), 1));
+    assert!(output_state.eq(&false.into(), 1));
+}
