@@ -768,6 +768,10 @@ impl Simulator {
         self.wire_states.reset();
         self.output_states.reset();
         self.memory.reset();
+
+        self.wire_states_need_sync = false;
+        self.output_states_need_sync = false;
+        self.memory_needs_sync = false;
     }
 }
 
