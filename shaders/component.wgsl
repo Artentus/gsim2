@@ -54,8 +54,9 @@ fn gate_impl(component: Component) -> bool {
     for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
         let index = bit_index / 32u;
 
-        if !logic_state_equal(output_states[c_output.state_offset + index], new_state[index]) {
-            output_states[c_output.state_offset + index] = new_state[index];
+        let dst = &output_states[c_output.state_offset + index];
+        if !logic_state_equal(*dst, new_state[index]) {
+            *dst = new_state[index];
             state_changed = true;
         }
     }
@@ -79,8 +80,9 @@ fn not_impl(component: Component) -> bool {
         }
         atom = logic_not(atom);
 
-        if !logic_state_equal(output_states[c_output.state_offset + index], atom) {
-            output_states[c_output.state_offset + index] = atom;
+        let dst = &output_states[c_output.state_offset + index];
+        if !logic_state_equal(*dst, atom) {
+            *dst = atom;
             state_changed = true;
         }
     }
@@ -109,8 +111,9 @@ fn buffer_impl(component: Component) -> bool {
             atom = HIGH_Z;
         }
 
-        if !logic_state_equal(output_states[c_output.state_offset + index], atom) {
-            output_states[c_output.state_offset + index] = atom;
+        let dst = &output_states[c_output.state_offset + index];
+        if !logic_state_equal(*dst, atom) {
+            *dst = atom;
             state_changed = true;
         }
     }

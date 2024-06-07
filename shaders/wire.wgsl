@@ -22,7 +22,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     var new_state: array<WireStateAtom, MAX_STATE_LEN>;
     for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
         let index = bit_index / 32u;
-        new_state[index] = WireStateAtom(wire_drives[wire.drive_offset + index], 0u);
+        new_state[index] = WireStateAtom(wire_drives[wire.drive_offset + index], 0u, 0u);
     }
 
     if wire.first_driver_offset != INVALID_INDEX {
@@ -52,8 +52,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
         let index = bit_index / 32u;
 
-        if !logic_state_equal(wire_states[wire.state_offset + index], new_state[index].state) {
-            wire_states[wire.state_offset + index] = new_state[index].state;
+        let dst = &wire_states[wire.state_offset + index];
+        if !logic_state_equal(*dst, new_state[index].state) {
+            *dst = new_state[index].state;
             state_changed = true;
         }
 

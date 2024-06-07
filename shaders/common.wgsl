@@ -200,6 +200,7 @@ fn logic_not(v: LogicStateAtom) -> LogicStateAtom {
 struct WireStateAtom {
     state: LogicStateAtom,
     conflict: u32,
+    padding: u32, // align struct size to 16 to not tank performance
 };
 
 fn combine_state(a: WireStateAtom, b: LogicStateAtom) -> WireStateAtom {
@@ -231,7 +232,7 @@ fn combine_state(a: WireStateAtom, b: LogicStateAtom) -> WireStateAtom {
                  | (a.state.valid & b.state)
                  | (a.state.valid & b.valid);
 
-    return WireStateAtom(LogicStateAtom(state, valid), conflict);
+    return WireStateAtom(LogicStateAtom(state, valid), conflict, 0u);
 }
 
 const MAX_STATE_LEN = 8u;
