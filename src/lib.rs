@@ -125,6 +125,7 @@ pub struct InvalidWireIdError;
 #[derive(Debug, Clone)]
 pub enum AddComponentError {
     InvalidWireId,
+    TooManyInputs,
     OutOfMemory,
 }
 
@@ -236,7 +237,7 @@ mod private {
 
     #[pod_enum]
     #[derive(Eq, PartialOrd, Ord)]
-    #[repr(u32)]
+    #[repr(u16)]
     pub enum ComponentKind {
         And = 0,
         Or = 1,
@@ -283,10 +284,10 @@ mod private {
     #[repr(C)]
     pub struct Component {
         pub kind: ComponentKind,
+        pub output_count: u8,
+        pub input_count: u8,
         pub first_output: Index<ComponentOutput>,
-        pub output_count: u32,
         pub first_input: Index<ComponentInput>,
-        pub input_count: u32,
         pub memory_offset: Offset<Memory>,
         pub memory_size: u32,
     }
@@ -300,13 +301,13 @@ mod private {
             wires: &mut Buffer<Wire, Building>,
             output_states: &mut LogicStateBuffer<OutputState, Building>,
             outputs: &mut Buffer<ComponentOutput, Building>,
-        ) -> Result<(Index<ComponentOutput>, u32), AddComponentError>;
+        ) -> Result<(Index<ComponentOutput>, u8), AddComponentError>;
 
         fn create_inputs(
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<(Index<ComponentInput>, u32), AddComponentError>;
+        ) -> Result<(Index<ComponentInput>, u8), AddComponentError>;
 
         fn create_memory(
             &self,
@@ -322,7 +323,7 @@ mod private {
                 wires: &mut Buffer<Wire, Building>,
                 output_states: &mut LogicStateBuffer<OutputState, Building>,
                 outputs: &mut Buffer<ComponentOutput, Building>,
-            ) -> Result<(Index<ComponentOutput>, u32), AddComponentError> {
+            ) -> Result<(Index<ComponentOutput>, u8), AddComponentError> {
                 let output_wire = wires
                     .get_mut(self.output.0)
                     .ok_or(AddComponentError::InvalidWireId)?;
@@ -365,9 +366,14 @@ mod private {
                     &self,
                     wires: &Buffer<Wire, Building>,
                     inputs: &mut Buffer<ComponentInput, Building>,
-                ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
-                    let mut first_input_index = Index::INVALID;
+                ) -> Result<(Index<ComponentInput>, u8), AddComponentError> {
+                    let input_count: u8 = self
+                        .inputs
+                        .len()
+                        .try_into()
+                        .map_err(|_| AddComponentError::TooManyInputs)?;
 
+                    let mut first_input_index = Index::INVALID;
                     for input in self.inputs {
                         let input_wire =
                             wires.get(input.0).ok_or(AddComponentError::InvalidWireId)?;
@@ -383,7 +389,7 @@ mod private {
                         }
                     }
 
-                    Ok((first_input_index, self.inputs.len() as u32))
+                    Ok((first_input_index, input_count))
                 }
 
                 no_memory!();
@@ -407,7 +413,7 @@ mod private {
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
+        ) -> Result<(Index<ComponentInput>, u8), AddComponentError> {
             let input_wire = wires
                 .get(self.input.0)
                 .ok_or(AddComponentError::InvalidWireId)?;
@@ -433,7 +439,7 @@ mod private {
             &self,
             wires: &Buffer<Wire, Building>,
             inputs: &mut Buffer<ComponentInput, Building>,
-        ) -> Result<(Index<ComponentInput>, u32), AddComponentError> {
+        ) -> Result<(Index<ComponentInput>, u8), AddComponentError> {
             let input_wire = wires
                 .get(self.input.0)
                 .ok_or(AddComponentError::InvalidWireId)?;
@@ -567,10 +573,10 @@ impl SimulatorBuilder {
 
         let component = Component {
             kind: Args::COMPONENT_KIND,
-            first_output,
             output_count,
-            first_input,
             input_count,
+            first_output,
+            first_input,
             memory_offset,
             memory_size,
         };
@@ -686,7 +692,7 @@ impl Simulator {
     }
 
     pub fn run(&mut self, mut max_steps: u64) -> SimulationRunResult {
-        const RESET_WIRES_CHANGED     : u32 = 0x1;
+        const RESET_WIRES_CHANGED: u32 = 0x1;
         const RESET_COMPONENTS_CHANGED: u32 = 0x2;
 
         self.wire_states.update(&self.queue);

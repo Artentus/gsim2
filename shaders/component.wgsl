@@ -133,8 +133,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if component_index >= arrayLength(&components) {
         return;
     }
-    let component = components[component_index];
-
+    let component = unpack_component(components[component_index]);
+    
     var state_changed = false;
     switch component.kind {
         case COMPONENT_KIND_AND,

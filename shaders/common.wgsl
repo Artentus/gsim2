@@ -316,18 +316,16 @@ const COMPONENT_KIND_CMPSGT = 27u;
 const COMPONENT_KIND_CMPSLE = 28u;
 const COMPONENT_KIND_CMPSGE = 29u;
 
-struct Component {
-    kind: u32,
+struct PackedComponent {
+    kind_output_count_input_count: u32,
     first_output: u32,
-    output_count: u32,
     first_input: u32,
-    input_count: u32,
     memory_offset: u32,
     memory_size: u32,
 }
 
 @group(0) @binding(8) 
-var<storage, read> components: array<Component>;
+var<storage, read> components: array<PackedComponent>;
 
 struct ListData {
     wires_changed: atomic<u32>,
@@ -343,3 +341,29 @@ var<storage, read_write> list_data: ListData;
 var<storage, read_write> conflict_list: array<u32>;
 
 var<push_constant> reset_changed: u32;
+
+struct Component {
+    kind: u32,
+    output_count: u32,
+    input_count: u32,
+    first_output: u32,
+    first_input: u32,
+    memory_offset: u32,
+    memory_size: u32,
+}
+
+fn unpack_component(component: PackedComponent) -> Component {
+    let kind = component.kind_output_count_input_count & 0xFFFFu;
+    let output_count = (component.kind_output_count_input_count >> 16u) & 0xFFu;
+    let input_count = (component.kind_output_count_input_count >> 24u) & 0xFFu;
+
+    return Component(
+        kind,
+        output_count,
+        input_count,
+        component.first_output,
+        component.first_input,
+        component.memory_offset,
+        component.memory_size,
+    );
+}
