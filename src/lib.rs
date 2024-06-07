@@ -588,8 +588,10 @@ impl SimulatorBuilder {
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 #[repr(C)]
 struct ListData {
-    changed: u32,
+    wires_changed: u32,
+    components_changed: u32,
     conflict_list_len: u32,
+    has_conflicts: u32,
 }
 
 const WORKGROUP_SIZE: u32 = 64;
@@ -684,8 +686,8 @@ impl Simulator {
     }
 
     pub fn run(&mut self, mut max_steps: u64) -> SimulationRunResult {
-        const WIRE_STATES_CHANGED: u32 = 0x1;
-        const COMPONENT_STATES_CHANGED: u32 = 0x2;
+        const RESET_WIRES_CHANGED     : u32 = 0x1;
+        const RESET_COMPONENTS_CHANGED: u32 = 0x2;
 
         self.wire_states.update(&self.queue);
         self.wire_drives.update(&self.queue);
@@ -706,8 +708,10 @@ impl Simulator {
             &self.list_data_buffer,
             0,
             bytemuck::bytes_of(&ListData {
-                changed: WIRE_STATES_CHANGED | COMPONENT_STATES_CHANGED,
+                wires_changed: self.wires.len(),
+                components_changed: self.components.len(),
                 conflict_list_len: 0,
+                has_conflicts: 0,
             }),
         );
 
@@ -720,14 +724,14 @@ impl Simulator {
 
                 for _ in 0..32 {
                     pass.set_pipeline(&self.reset_pipeline);
-                    pass.set_push_constants(0, bytemuck::bytes_of(&WIRE_STATES_CHANGED));
+                    pass.set_push_constants(0, bytemuck::bytes_of(&RESET_WIRES_CHANGED));
                     pass.dispatch_workgroups(1, 1, 1);
 
                     pass.set_pipeline(&self.wire_pipeline);
                     pass.dispatch_workgroups(self.wires.len().div_ceil(WORKGROUP_SIZE), 1, 1);
 
                     pass.set_pipeline(&self.reset_pipeline);
-                    pass.set_push_constants(0, bytemuck::bytes_of(&COMPONENT_STATES_CHANGED));
+                    pass.set_push_constants(0, bytemuck::bytes_of(&RESET_COMPONENTS_CHANGED));
                     pass.dispatch_workgroups(1, 1, 1);
 
                     pass.set_pipeline(&self.component_pipeline);
@@ -743,7 +747,7 @@ impl Simulator {
             self.queue.submit(Some(encoder.finish()));
 
             let list_data = self.read_list_data();
-            if list_data.conflict_list_len > 0 {
+            if list_data.has_conflicts != 0 {
                 let mut conflicting_wires =
                     vec![WireId::INVALID; list_data.conflict_list_len as usize].into_boxed_slice();
 
@@ -756,7 +760,7 @@ impl Simulator {
                 );
 
                 return SimulationRunResult::Err { conflicting_wires };
-            } else if list_data.changed == 0 {
+            } else if (list_data.wires_changed == 0) && (list_data.components_changed == 0) {
                 return SimulationRunResult::Ok;
             }
         }

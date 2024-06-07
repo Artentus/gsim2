@@ -331,12 +331,11 @@ struct Component {
 @group(0) @binding(8) 
 var<storage> components: array<Component>;
 
-const WIRE_STATES_CHANGED      = 0x1u;
-const COMPONENT_STATES_CHANGED = 0x2u;
-
 struct ListData {
-    changed: atomic<u32>,
+    wires_changed: atomic<u32>,
+    components_changed: atomic<u32>,
     conflict_list_len: atomic<u32>,
+    has_conflicts: atomic<u32>,
 }
 
 @group(0) @binding(9) 

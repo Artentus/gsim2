@@ -123,9 +123,9 @@ fn buffer_impl(component: Component) -> bool {
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let wires_changed = (atomicLoad(&list_data.changed) & WIRE_STATES_CHANGED) != 0u;
-    let has_conflicts = atomicLoad(&list_data.conflict_list_len) > 0u;
-    if !wires_changed || has_conflicts {
+    let wires_changed = atomicLoad(&list_data.wires_changed);
+    let has_conflicts = atomicLoad(&list_data.has_conflicts);
+    if (wires_changed == 0u) || (has_conflicts != 0u) {
         return;
     }
 
@@ -155,6 +155,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     if state_changed {
-        atomicOr(&list_data.changed, COMPONENT_STATES_CHANGED);
+        atomicAdd(&list_data.components_changed, 1u);
     }
 }
