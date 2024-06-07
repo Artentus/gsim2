@@ -242,7 +242,7 @@ const INVALID_INDEX = 0xFFFFFFFFu;
 var<storage, read_write> wire_states: array<LogicStateAtom>;
 
 @group(0) @binding(1) 
-var<storage> wire_drives: array<LogicStateAtom>;
+var<storage, read> wire_drives: array<LogicStateAtom>;
 
 struct WireDriver {
     width: u32,
@@ -251,7 +251,7 @@ struct WireDriver {
 }
 
 @group(0) @binding(2) 
-var<storage> wire_drivers: array<WireDriver>;
+var<storage, read> wire_drivers: array<WireDriver>;
 
 struct Wire {
     width: u32,
@@ -263,7 +263,7 @@ struct Wire {
 }
 
 @group(0) @binding(3) 
-var<storage> wires: array<Wire>;
+var<storage, read> wires: array<Wire>;
 
 @group(0) @binding(4) 
 var<storage, read_write> output_states: array<LogicStateAtom>;
@@ -274,7 +274,7 @@ struct ComponentOutput {
 }
 
 @group(0) @binding(5) 
-var<storage> outputs: array<ComponentOutput>;
+var<storage, read> outputs: array<ComponentOutput>;
 
 struct ComponentInput {
     width: u32,
@@ -282,7 +282,7 @@ struct ComponentInput {
 }
 
 @group(0) @binding(6) 
-var<storage> inputs: array<ComponentInput>;
+var<storage, read> inputs: array<ComponentInput>;
 
 @group(0) @binding(7) 
 var<storage, read_write> memory: array<LogicStateAtom>;
@@ -329,7 +329,7 @@ struct Component {
 }
 
 @group(0) @binding(8) 
-var<storage> components: array<Component>;
+var<storage, read> components: array<Component>;
 
 struct ListData {
     wires_changed: atomic<u32>,
