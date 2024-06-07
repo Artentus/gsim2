@@ -19,18 +19,21 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let wire = wires[wire_index];
 
-    var new_state: array<WireStateAtom, MAX_STATE_LEN>;
+    var new_state: array<LogicStateAtom, MAX_STATE_LEN>;
     for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
         let index = bit_index / 32u;
-        new_state[index] = WireStateAtom(wire_drives[wire.drive_offset + index], 0u, 0u);
+        new_state[index] = wire_drives[wire.drive_offset + index];
     }
 
+    var has_conflict = false;
     if wire.first_driver_offset != INVALID_INDEX {
         for (var bit_index = 0u; bit_index < min(wire.width, wire.first_driver_width); bit_index += 32u) {
             let index = bit_index / 32u;
 
             let output_state = output_states[wire.first_driver_offset + index];
-            new_state[index] = combine_state(new_state[index], output_state);
+            let combine_result = combine_state(new_state[index], output_state);
+            has_conflict |= combine_result.conflict;
+            new_state[index] = combine_result.atom;
         }
 
         var next_driver = wire.driver_list;
@@ -42,24 +45,22 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
                 let index = bit_index / 32u;
 
                 let output_state = output_states[driver.output_state_offset + index];
-                new_state[index] = combine_state(new_state[index], output_state);
+                let combine_result = combine_state(new_state[index], output_state);
+                has_conflict |= combine_result.conflict;
+                new_state[index] = combine_result.atom;
             }
         }
     }
 
     var state_changed = false;
-    var has_conflict = false;
     for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
         let index = bit_index / 32u;
 
         let dst = &wire_states[wire.state_offset + index];
-        if !logic_state_equal(*dst, new_state[index].state) {
-            *dst = new_state[index].state;
+        let src = new_state[index];
+        if !logic_state_equal(*dst, src) {
+            *dst = src;
             state_changed = true;
-        }
-
-        if new_state[index].conflict != 0u {
-            has_conflict = true;
         }
     }
 

@@ -197,13 +197,12 @@ fn logic_not(v: LogicStateAtom) -> LogicStateAtom {
     return LogicStateAtom(~v.state | ~v.valid, v.valid);
 }
 
-struct WireStateAtom {
-    state: LogicStateAtom,
-    conflict: u32,
-    padding: u32, // align struct size to 16 to not tank performance
-};
+struct CombineResult {
+    atom: LogicStateAtom,
+    conflict: bool,
+}
 
-fn combine_state(a: WireStateAtom, b: LogicStateAtom) -> WireStateAtom {
+fn combine_state(a: LogicStateAtom, b: LogicStateAtom) -> CombineResult {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning | conflict
     // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------|----------
     //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    0    |    0    | High-Z    | no
@@ -223,16 +222,15 @@ fn combine_state(a: WireStateAtom, b: LogicStateAtom) -> WireStateAtom {
     //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
     //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    -    |    -    | -         | yes
 
-    let state = a.state.state | b.state;
-    let valid = a.state.valid | b.valid;
+    let state = a.state | b.state;
+    let valid = a.valid | b.valid;
 
-    let conflict = a.conflict
-                 | (a.state.state & b.state)
-                 | (a.state.state & b.valid)
-                 | (a.state.valid & b.state)
-                 | (a.state.valid & b.valid);
+    let conflict = (a.state & b.state)
+                 | (a.state & b.valid)
+                 | (a.valid & b.state)
+                 | (a.valid & b.valid);
 
-    return WireStateAtom(LogicStateAtom(state, valid), conflict, 0u);
+    return CombineResult(LogicStateAtom(state, valid), conflict != 0u);
 }
 
 const MAX_STATE_LEN = 8u;
