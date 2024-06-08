@@ -82,7 +82,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in and_gates {
         let _id = builder
-            .add_component(AndGateArgs {
+            .add_component(AndGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -91,7 +91,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in or_gates {
         let _id = builder
-            .add_component(OrGateArgs {
+            .add_component(OrGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -100,7 +100,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in xor_gates {
         let _id = builder
-            .add_component(XorGateArgs {
+            .add_component(XorGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -109,7 +109,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in nand_gates {
         let _id = builder
-            .add_component(NandGateArgs {
+            .add_component(NandGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -118,7 +118,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in nor_gates {
         let _id = builder
-            .add_component(NorGateArgs {
+            .add_component(NorGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -127,7 +127,7 @@ fn generate_sim() -> Simulator {
 
     for (input_a, input_b, output) in xnor_gates {
         let _id = builder
-            .add_component(XnorGateArgs {
+            .add_component(XnorGatePorts {
                 inputs: &[input_a, input_b],
                 output,
             })
@@ -136,13 +136,13 @@ fn generate_sim() -> Simulator {
 
     for (input, output) in not_gates {
         let _id = builder
-            .add_component(NotGateArgs { input, output })
+            .add_component(NotGatePorts { input, output })
             .unwrap();
     }
 
     for (input, enable, output) in buffers {
         let _id = builder
-            .add_component(BufferArgs {
+            .add_component(BufferPorts {
                 input,
                 enable,
                 output,

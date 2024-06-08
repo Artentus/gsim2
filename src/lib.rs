@@ -137,7 +137,7 @@ impl From<BufferPushError> for AddComponentError {
     }
 }
 
-macro_rules! gate_component_args {
+macro_rules! gate_ports {
     ($args:ident) => {
         #[derive(Debug, Clone)]
         pub struct $args<'a> {
@@ -147,21 +147,21 @@ macro_rules! gate_component_args {
     };
 }
 
-gate_component_args!(AndGateArgs);
-gate_component_args!(OrGateArgs);
-gate_component_args!(XorGateArgs);
-gate_component_args!(NandGateArgs);
-gate_component_args!(NorGateArgs);
-gate_component_args!(XnorGateArgs);
+gate_ports!(AndGatePorts);
+gate_ports!(OrGatePorts);
+gate_ports!(XorGatePorts);
+gate_ports!(NandGatePorts);
+gate_ports!(NorGatePorts);
+gate_ports!(XnorGatePorts);
 
 #[derive(Debug, Clone)]
-pub struct NotGateArgs {
+pub struct NotGatePorts {
     pub input: WireId,
     pub output: WireId,
 }
 
 #[derive(Debug, Clone)]
-pub struct BufferArgs {
+pub struct BufferPorts {
     pub input: WireId,
     pub enable: WireId,
     pub output: WireId,
@@ -292,7 +292,7 @@ mod private {
         pub memory_size: u32,
     }
 
-    pub trait AddComponentArgs {
+    pub trait ComponentPorts {
         const COMPONENT_KIND: ComponentKind;
 
         fn create_outputs(
@@ -355,9 +355,9 @@ mod private {
         };
     }
 
-    macro_rules! impl_gate_component_args {
+    macro_rules! impl_gate_ports {
         ($args:ident => $kind:ident) => {
-            impl AddComponentArgs for $args<'_> {
+            impl ComponentPorts for $args<'_> {
                 const COMPONENT_KIND: ComponentKind = ComponentKind::$kind;
 
                 single_output!();
@@ -397,14 +397,14 @@ mod private {
         };
     }
 
-    impl_gate_component_args!(AndGateArgs => And);
-    impl_gate_component_args!(OrGateArgs => Or);
-    impl_gate_component_args!(XorGateArgs => Xor);
-    impl_gate_component_args!(NandGateArgs => Nand);
-    impl_gate_component_args!(NorGateArgs => Nor);
-    impl_gate_component_args!(XnorGateArgs => Xnor);
+    impl_gate_ports!(AndGatePorts => And);
+    impl_gate_ports!(OrGatePorts => Or);
+    impl_gate_ports!(XorGatePorts => Xor);
+    impl_gate_ports!(NandGatePorts => Nand);
+    impl_gate_ports!(NorGatePorts => Nor);
+    impl_gate_ports!(XnorGatePorts => Xnor);
 
-    impl AddComponentArgs for NotGateArgs {
+    impl ComponentPorts for NotGatePorts {
         const COMPONENT_KIND: ComponentKind = ComponentKind::Not;
 
         single_output!();
@@ -430,7 +430,7 @@ mod private {
         no_memory!();
     }
 
-    impl AddComponentArgs for BufferArgs {
+    impl ComponentPorts for BufferPorts {
         const COMPONENT_KIND: ComponentKind = ComponentKind::Not;
 
         single_output!();
@@ -558,21 +558,21 @@ impl SimulatorBuilder {
 
     wire_drive_fns!();
 
-    pub fn add_component<Args: AddComponentArgs>(
+    pub fn add_component<Ports: ComponentPorts>(
         &mut self,
-        args: Args,
+        ports: Ports,
     ) -> Result<ComponentId, AddComponentError> {
-        let (first_output, output_count) = args.create_outputs(
+        let (first_output, output_count) = ports.create_outputs(
             &mut self.wire_drivers,
             &mut self.wires,
             &mut self.output_states,
             &mut self.outputs,
         )?;
-        let (first_input, input_count) = args.create_inputs(&self.wires, &mut self.inputs)?;
-        let (memory_offset, memory_size) = args.create_memory(&mut self.memory)?;
+        let (first_input, input_count) = ports.create_inputs(&self.wires, &mut self.inputs)?;
+        let (memory_offset, memory_size) = ports.create_memory(&mut self.memory)?;
 
         let component = Component {
-            kind: Args::COMPONENT_KIND,
+            kind: Ports::COMPONENT_KIND,
             output_count,
             input_count,
             first_output,
@@ -792,7 +792,7 @@ fn run() {
     let input_b = builder.add_wire(1).unwrap();
     let output = builder.add_wire(1).unwrap();
     let gate = builder
-        .add_component(AndGateArgs {
+        .add_component(AndGatePorts {
             inputs: &[input_a, input_b],
             output,
         })
