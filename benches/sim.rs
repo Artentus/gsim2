@@ -24,89 +24,130 @@ fn generate_sim() -> Simulator {
         wires.push(wire);
     }
 
+    let mut and_gates = Vec::new();
+    let mut or_gates = Vec::new();
+    let mut xor_gates = Vec::new();
+    let mut nand_gates = Vec::new();
+    let mut nor_gates = Vec::new();
+    let mut xnor_gates = Vec::new();
+    let mut not_gates = Vec::new();
+    let mut buffers = Vec::new();
+
     for _ in 0..1000000 {
         let output = builder.add_wire(1).unwrap();
         match comp_dist.sample(&mut rng) {
             0 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(AndGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                and_gates.push((input_a, input_b, output));
             }
             1 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(OrGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                or_gates.push((input_a, input_b, output));
             }
             2 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(XorGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                xor_gates.push((input_a, input_b, output));
             }
             3 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(NandGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                nand_gates.push((input_a, input_b, output));
             }
             4 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(NorGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                nor_gates.push((input_a, input_b, output));
             }
             5 => {
                 let input_a = *wires.choose(&mut rng).unwrap();
                 let input_b = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(XnorGateArgs {
-                        inputs: &[input_a, input_b],
-                        output,
-                    })
-                    .unwrap();
+                xnor_gates.push((input_a, input_b, output));
             }
             6 => {
                 let input = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(NotGateArgs { input, output })
-                    .unwrap();
+                not_gates.push((input, output));
             }
             7 => {
                 let input = *wires.choose(&mut rng).unwrap();
                 let enable = *wires.choose(&mut rng).unwrap();
-                let _id = builder
-                    .add_component(BufferArgs {
-                        input,
-                        enable,
-                        output,
-                    })
-                    .unwrap();
+                buffers.push((input, enable, output));
             }
             _ => unreachable!(),
         }
         wires.push(output);
+    }
+
+    for (input_a, input_b, output) in and_gates {
+        let _id = builder
+            .add_component(AndGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input_a, input_b, output) in or_gates {
+        let _id = builder
+            .add_component(OrGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input_a, input_b, output) in xor_gates {
+        let _id = builder
+            .add_component(XorGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input_a, input_b, output) in nand_gates {
+        let _id = builder
+            .add_component(NandGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input_a, input_b, output) in nor_gates {
+        let _id = builder
+            .add_component(NorGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input_a, input_b, output) in xnor_gates {
+        let _id = builder
+            .add_component(XnorGateArgs {
+                inputs: &[input_a, input_b],
+                output,
+            })
+            .unwrap();
+    }
+
+    for (input, output) in not_gates {
+        let _id = builder
+            .add_component(NotGateArgs { input, output })
+            .unwrap();
+    }
+
+    for (input, enable, output) in buffers {
+        let _id = builder
+            .add_component(BufferArgs {
+                input,
+                enable,
+                output,
+            })
+            .unwrap();
     }
 
     let sim = builder.build().unwrap();
