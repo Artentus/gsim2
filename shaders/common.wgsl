@@ -233,7 +233,12 @@ fn combine_state(a: LogicStateAtom, b: LogicStateAtom) -> CombineResult {
     return CombineResult(LogicStateAtom(state, valid), conflict != 0u);
 }
 
-const MAX_STATE_LEN = 8u;
+const MIN_WIRE_WIDTH = 1u;
+const MAX_WIRE_WIDTH = 256u;
+
+const ATOM_BITS = 32u;
+const MAX_ATOM_COUNT = MAX_WIRE_WIDTH / ATOM_BITS;
+
 const INVALID_INDEX = 0xFFFFFFFFu;
 
 @group(0) @binding(0) 
@@ -318,7 +323,8 @@ const COMPONENT_KIND_CMPSGE = 29u;
 
 struct PackedComponent {
     kind_output_count_input_count: u32,
-    first_output: u32,
+    output_width: u32,
+    output_offset_or_first_output: u32,
     first_input: u32,
     memory_offset: u32,
     memory_size: u32,
@@ -346,7 +352,8 @@ struct Component {
     kind: u32,
     output_count: u32,
     input_count: u32,
-    first_output: u32,
+    output_width: u32,
+    output_offset_or_first_output: u32,
     first_input: u32,
     memory_offset: u32,
     memory_size: u32,
@@ -361,7 +368,8 @@ fn unpack_component(component: PackedComponent) -> Component {
         kind,
         output_count,
         input_count,
-        component.first_output,
+        component.output_width,
+        component.output_offset_or_first_output,
         component.first_input,
         component.memory_offset,
         component.memory_size,

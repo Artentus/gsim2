@@ -19,16 +19,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let wire = wires[wire_index];
 
-    var new_state: array<LogicStateAtom, MAX_STATE_LEN>;
-    for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    var new_state: array<LogicStateAtom, MAX_ATOM_COUNT>;
+    for (var bit_index = 0u; bit_index < wire.width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
         new_state[index] = wire_drives[wire.drive_offset + index];
     }
 
     var has_conflict = false;
     if wire.first_driver_offset != INVALID_INDEX {
-        for (var bit_index = 0u; bit_index < min(wire.width, wire.first_driver_width); bit_index += 32u) {
-            let index = bit_index / 32u;
+        for (var bit_index = 0u; bit_index < min(wire.width, wire.first_driver_width); bit_index += ATOM_BITS) {
+            let index = bit_index / ATOM_BITS;
 
             let output_state = output_states[wire.first_driver_offset + index];
             let combine_result = combine_state(new_state[index], output_state);
@@ -41,8 +41,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             let driver = wire_drivers[next_driver];
             next_driver = driver.next_driver;
 
-            for (var bit_index = 0u; bit_index < min(wire.width, driver.width); bit_index += 32u) {
-                let index = bit_index / 32u;
+            for (var bit_index = 0u; bit_index < min(wire.width, driver.width); bit_index += ATOM_BITS) {
+                let index = bit_index / ATOM_BITS;
 
                 let output_state = output_states[driver.output_state_offset + index];
                 let combine_result = combine_state(new_state[index], output_state);
@@ -53,8 +53,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     var state_changed = false;
-    for (var bit_index = 0u; bit_index < wire.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    for (var bit_index = 0u; bit_index < wire.width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
 
         let dst = &wire_states[wire.state_offset + index];
         let src = new_state[index];

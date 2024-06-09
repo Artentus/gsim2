@@ -371,7 +371,6 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
 
         staging_buffer: None,
         wire_states_need_sync: false,
-        output_states_need_sync: false,
         memory_needs_sync: false,
     })
 }

@@ -1,10 +1,9 @@
 fn gate_impl(component: Component) -> bool {
-    var new_state: array<LogicStateAtom, MAX_STATE_LEN>;
-    let c_output = outputs[component.first_output];
+    var new_state: array<LogicStateAtom, MAX_ATOM_COUNT>;
 
     let first_input = inputs[component.first_input];
-    for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
 
         if bit_index < first_input.width {
             new_state[index] = wire_states[first_input.wire_state_offset + index];
@@ -16,8 +15,8 @@ fn gate_impl(component: Component) -> bool {
     for (var input_index = 0u; input_index < component.input_count; input_index++) {
         let c_input = inputs[component.first_input + input_index];
 
-        for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
-            let index = bit_index / 32u;
+        for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+            let index = bit_index / ATOM_BITS;
 
             var input_atom: LogicStateAtom;
             if bit_index < c_input.width {
@@ -51,10 +50,10 @@ fn gate_impl(component: Component) -> bool {
     }
 
     var state_changed = false;
-    for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
 
-        let dst = &output_states[c_output.state_offset + index];
+        let dst = &output_states[component.output_offset_or_first_output + index];
         if !logic_state_equal(*dst, new_state[index]) {
             *dst = new_state[index];
             state_changed = true;
@@ -65,12 +64,11 @@ fn gate_impl(component: Component) -> bool {
 }
 
 fn not_impl(component: Component) -> bool {
-    let c_output = outputs[component.first_output];
     let c_input = inputs[component.first_input];
 
     var state_changed = false;
-    for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
 
         var atom: LogicStateAtom;
         if bit_index < c_input.width {
@@ -80,7 +78,7 @@ fn not_impl(component: Component) -> bool {
         }
         atom = logic_not(atom);
 
-        let dst = &output_states[c_output.state_offset + index];
+        let dst = &output_states[component.output_offset_or_first_output + index];
         if !logic_state_equal(*dst, atom) {
             *dst = atom;
             state_changed = true;
@@ -91,16 +89,15 @@ fn not_impl(component: Component) -> bool {
 }
 
 fn buffer_impl(component: Component) -> bool {
-    let c_output = outputs[component.first_output];
     let c_input = inputs[component.first_input];
-    let c_enable = inputs[component.first_output + 1u];
+    let c_enable = inputs[component.first_input + 1u];
 
     let enable_state = (wire_states[c_enable.wire_state_offset].state & 0x1u) > 0u;
     let enable_valid = (wire_states[c_enable.wire_state_offset].valid & 0x1u) > 0u;
 
     var state_changed = false;
-    for (var bit_index = 0u; bit_index < c_output.width; bit_index += 32u) {
-        let index = bit_index / 32u;
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
 
         var atom: LogicStateAtom;
         if !enable_valid {
@@ -111,7 +108,7 @@ fn buffer_impl(component: Component) -> bool {
             atom = HIGH_Z;
         }
 
-        let dst = &output_states[c_output.state_offset + index];
+        let dst = &output_states[component.output_offset_or_first_output + index];
         if !logic_state_equal(*dst, atom) {
             *dst = atom;
             state_changed = true;
