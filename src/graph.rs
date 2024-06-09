@@ -483,6 +483,16 @@ impl_arithmetic_ports!(SubtractPorts => Sub);
 impl_arithmetic_ports!(LeftShiftPorts => Lsh);
 impl_arithmetic_ports!(LogicalRightShiftPorts => LRsh);
 impl_arithmetic_ports!(ArithmeticRightShiftPorts => ARsh);
+impl_arithmetic_ports!(CompareEqual => CmpEq);
+impl_arithmetic_ports!(CompareNotEqual => CmpNe);
+impl_arithmetic_ports!(CompareUnsignedLessThan => CmpUlt);
+impl_arithmetic_ports!(CompareUnsignedGreaterThan => CmpUgt);
+impl_arithmetic_ports!(CompareUnsignedLessThanOrEqual => CmpUle);
+impl_arithmetic_ports!(CompareUnsignedGreaterThanEqual => CmpUge);
+impl_arithmetic_ports!(CompareSignedLessThan => CmpSlt);
+impl_arithmetic_ports!(CompareSignedGreaterThan => CmpSgt);
+impl_arithmetic_ports!(CompareSignedLessThanOrEqual => CmpSle);
+impl_arithmetic_ports!(CompareSignedGreaterThanEqual => CmpSge);
 
 impl ComponentPorts for NegatePorts {
     const COMPONENT_KIND: ComponentKind = ComponentKind::Neg;

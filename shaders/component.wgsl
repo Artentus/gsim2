@@ -118,6 +118,62 @@ fn buffer_impl(component: Component) -> bool {
     return state_changed;
 }
 
+fn add_impl(component: Component) -> bool {
+    let input_a = inputs[component.first_input];
+    let input_b = inputs[component.first_input + 1u];
+
+    var state_changed = false;
+    var carry = LogicBitState(component.kind == COMPONENT_KIND_SUB, true);
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
+
+        var atom_a: LogicStateAtom;
+        if bit_index < input_a.width {
+            atom_a = wire_states[input_a.wire_state_offset + index];
+        } else {
+            atom_a = HIGH_Z;
+        }
+
+        var atom_b: LogicStateAtom;
+        if bit_index < input_b.width {
+            atom_b = wire_states[input_b.wire_state_offset + index];
+        } else {
+            atom_b = HIGH_Z;
+        }
+
+        if component.kind == COMPONENT_KIND_SUB {
+            atom_b.state = ~atom_b.state;
+        }
+
+        let result = logic_add(atom_a, atom_b, carry);
+        carry = result.carry;
+
+        let dst = &output_states[component.output_offset_or_first_output + index];
+        if !logic_state_equal(*dst, result.sum) {
+            *dst = result.sum;
+            state_changed = true;
+        }
+    }
+
+    return state_changed;
+}
+
+fn neg_impl(component: Component) -> bool {
+    return false;
+}
+
+fn lsh_impl(component: Component) -> bool {
+    return false;
+}
+
+fn rsh_impl(component: Component) -> bool {
+    return false;
+}
+
+fn hgate_impl(component: Component) -> bool {
+    return false;
+}
+
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let wires_changed = atomicLoad(&list_data.wires_changed);
@@ -134,12 +190,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     
     var state_changed = false;
     switch component.kind {
-        case COMPONENT_KIND_AND,
-          COMPONENT_KIND_OR,
-          COMPONENT_KIND_XOR,
-          COMPONENT_KIND_NAND,
-          COMPONENT_KIND_NOR,
-          COMPONENT_KIND_XNOR: {
+        case COMPONENT_KIND_AND, COMPONENT_KIND_OR, COMPONENT_KIND_XOR,
+             COMPONENT_KIND_NAND, COMPONENT_KIND_NOR, COMPONENT_KIND_XNOR: {
             state_changed = gate_impl(component);
         }
         case COMPONENT_KIND_NOT: {
@@ -147,6 +199,22 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         case COMPONENT_KIND_BUFFER: {
             state_changed = buffer_impl(component);
+        }
+        case COMPONENT_KIND_ADD, COMPONENT_KIND_SUB: {
+            state_changed = add_impl(component);
+        }
+        case COMPONENT_KIND_NEG: {
+            state_changed = neg_impl(component);
+        }
+        case COMPONENT_KIND_LSH: {
+            state_changed = lsh_impl(component);
+        }
+        case COMPONENT_KIND_LRSH, COMPONENT_KIND_ARSH: {
+            state_changed = rsh_impl(component);
+        }
+        case COMPONENT_KIND_HAND, COMPONENT_KIND_HOR, COMPONENT_KIND_HXOR,
+             COMPONENT_KIND_HNAND, COMPONENT_KIND_HNOR, COMPONENT_KIND_HXNOR: {
+            state_changed = hgate_impl(component);
         }
         default: {}
     }

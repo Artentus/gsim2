@@ -12,11 +12,6 @@ fn main() {
     }
 
     let conflict_list_len = atomicLoad(&list_data.conflict_list_len);
-    var has_conflicts: u32;
-    if conflict_list_len > 0u {
-        has_conflicts = 1u;
-    } else {
-        has_conflicts = 0u;
-    };
+    let has_conflicts = u32(conflict_list_len > 0u);
     atomicStore(&list_data.has_conflicts, has_conflicts);
 }

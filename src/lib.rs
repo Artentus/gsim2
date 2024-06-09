@@ -128,6 +128,16 @@ arithmetic_ports!(SubtractPorts);
 arithmetic_ports!(LeftShiftPorts);
 arithmetic_ports!(LogicalRightShiftPorts);
 arithmetic_ports!(ArithmeticRightShiftPorts);
+arithmetic_ports!(CompareEqual);
+arithmetic_ports!(CompareNotEqual);
+arithmetic_ports!(CompareUnsignedLessThan);
+arithmetic_ports!(CompareUnsignedGreaterThan);
+arithmetic_ports!(CompareUnsignedLessThanOrEqual);
+arithmetic_ports!(CompareUnsignedGreaterThanEqual);
+arithmetic_ports!(CompareSignedLessThan);
+arithmetic_ports!(CompareSignedGreaterThan);
+arithmetic_ports!(CompareSignedLessThanOrEqual);
+arithmetic_ports!(CompareSignedGreaterThanEqual);
 
 #[derive(Debug, Clone)]
 pub struct NegatePorts {
