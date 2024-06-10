@@ -142,7 +142,7 @@ fn widening_add(a: u32, b: u32) -> WideningAddResult {
 fn carry_add(a: u32, b: u32, c: bool) -> WideningAddResult {
     let r1 = widening_add(a, b);
     let r2 = widening_add(r1.sum, u32(c));
-    return WideningAddResult(r2.sum, r1.carry | r2.carry);
+    return WideningAddResult(r2.sum, r1.carry || r2.carry);
 }
 
 struct AddResult {
@@ -171,7 +171,7 @@ fn logic_add(a: LogicStateAtom, b: LogicStateAtom, c: LogicBitState) -> AddResul
     
     return AddResult(
         LogicStateAtom(r.sum | ~valid, valid),
-        LogicBitState(r.carry | !carry_valid, carry_valid),
+        LogicBitState(r.carry || !carry_valid, carry_valid),
     );
 }
 
