@@ -158,7 +158,31 @@ fn add_impl(component: Component) -> bool {
 }
 
 fn neg_impl(component: Component) -> bool {
-    return false;
+    let c_input = inputs[component.first_input];
+
+    var state_changed = false;
+    var carry = LogicBitState(true, true);
+    for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
+        let index = bit_index / ATOM_BITS;
+
+        var atom: LogicStateAtom;
+        if bit_index < c_input.width {
+            atom = wire_states[c_input.wire_state_offset + index];
+        } else {
+            atom = HIGH_Z;
+        }
+
+        let result = logic_add(LOGIC_0, logic_not(atom), carry);
+        carry = result.carry;
+
+        let dst = &output_states[component.output_offset_or_first_output + index];
+        if !logic_state_equal(*dst, result.sum) {
+            *dst = result.sum;
+            state_changed = true;
+        }
+    }
+
+    return state_changed;
 }
 
 fn lsh_impl(component: Component) -> bool {

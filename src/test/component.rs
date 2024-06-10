@@ -768,22 +768,22 @@ fn sub() {
     test_binary_gate(add_sub, 32, TEST_DATA, 2);
 }
 
-//#[test]
-//fn neg() {
-//    const TEST_DATA: &[UnaryGateTestData] = unary_gate_test_data!(
-//        HIGH_Z -> UNDEFINED,
-//        UNDEFINED -> UNDEFINED,
-//
-//        0 -> 0,
-//        1 -> LOGIC_1,
-//        LOGIC_1 -> 1,
-//    );
-//
-//    test_unary_gate(add_neg, 16, TEST_DATA, 2);
-//    test_unary_gate(add_neg, 32, TEST_DATA, 2);
-//    test_unary_gate(add_neg, 33, TEST_DATA, 2);
-//    test_unary_gate(add_neg, 64, TEST_DATA, 2);
-//}
+#[test]
+fn neg() {
+    const TEST_DATA: &[UnaryGateTestData] = unary_gate_test_data!(
+        HIGH_Z -> UNDEFINED,
+        UNDEFINED -> UNDEFINED,
+
+        0 -> 0,
+        1 -> LOGIC_1,
+        LOGIC_1 -> 1,
+    );
+
+    test_unary_gate(add_neg, 16, TEST_DATA, 2);
+    test_unary_gate(add_neg, 32, TEST_DATA, 2);
+    test_unary_gate(add_neg, 33, TEST_DATA, 2);
+    test_unary_gate(add_neg, 64, TEST_DATA, 2);
+}
 
 //#[test]
 //fn mul() {
