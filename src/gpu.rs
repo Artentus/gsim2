@@ -6,7 +6,13 @@ use std::sync::OnceLock;
 use wgpu::Buffer;
 use wgpu::*;
 
-fn create_device() -> (Device, Queue) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateDeviceError {
+    AdapterNotFound,
+    DeviceNotSupported,
+}
+
+async fn create_device() -> Result<(Device, Queue), CreateDeviceError> {
     let instance_desc = InstanceDescriptor {
         backends: Backends::VULKAN | Backends::METAL,
         ..Default::default()
@@ -17,8 +23,10 @@ fn create_device() -> (Device, Queue) {
         power_preference: PowerPreference::HighPerformance,
         ..Default::default()
     };
-    let adapter = pollster::block_on(instance.request_adapter(&adapter_opts))
-        .expect("graphics adapter not found");
+    let adapter = instance
+        .request_adapter(&adapter_opts)
+        .await
+        .ok_or(CreateDeviceError::AdapterNotFound)?;
 
     let adapter_limits = adapter.limits();
     let device_limits = Limits {
@@ -43,15 +51,21 @@ fn create_device() -> (Device, Queue) {
         required_features: Features::PUSH_CONSTANTS,
         ..Default::default()
     };
-    let (device, queue) = pollster::block_on(adapter.request_device(&device_desc, None))
-        .expect("graphics device not supported");
+    let (device, queue) = adapter
+        .request_device(&device_desc, None)
+        .await
+        .map_err(|_| CreateDeviceError::DeviceNotSupported)?;
 
-    (device, queue)
+    Ok((device, queue))
 }
 
-fn device() -> &'static (Device, Queue) {
-    static DEVICE: OnceLock<(Device, Queue)> = OnceLock::new();
-    DEVICE.get_or_init(create_device)
+fn device() -> Result<&'static (Device, Queue), CreateDeviceError> {
+    static DEVICE: OnceLock<Result<(Device, Queue), CreateDeviceError>> = OnceLock::new();
+
+    DEVICE
+        .get_or_init(|| pollster::block_on(create_device()))
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 pub fn read_buffer<T: Pod>(
@@ -222,11 +236,11 @@ macro_rules! include_shader {
     }};
 }
 
-pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
+pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, CreateDeviceError> {
     use wgpu::util::{BufferInitDescriptor, DeviceExt};
     use wgpu::*;
 
-    let (device, queue) = device();
+    let (device, queue) = device()?;
 
     let list_data_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,

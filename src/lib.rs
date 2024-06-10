@@ -202,6 +202,23 @@ macro_rules! wire_drive_fns {
     };
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum SimulatorBuildError {
+    GraphicsAdapterNotFound,
+    GraphicsDeviceNotSupported,
+}
+
+impl From<gpu::CreateDeviceError> for SimulatorBuildError {
+    fn from(err: gpu::CreateDeviceError) -> Self {
+        match err {
+            gpu::CreateDeviceError::AdapterNotFound => SimulatorBuildError::GraphicsAdapterNotFound,
+            gpu::CreateDeviceError::DeviceNotSupported => {
+                SimulatorBuildError::GraphicsDeviceNotSupported
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SimulatorBuilder {
     wire_states: LogicStateBuffer<WireState, Building>,
@@ -280,8 +297,8 @@ impl SimulatorBuilder {
     }
 
     #[inline]
-    pub fn build(self) -> Result<Simulator, ()> {
-        gpu::create_simulator(self)
+    pub fn build(self) -> Result<Simulator, SimulatorBuildError> {
+        gpu::create_simulator(self).map_err(Into::into)
     }
 }
 
