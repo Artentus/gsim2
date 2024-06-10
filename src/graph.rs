@@ -277,7 +277,7 @@ macro_rules! single_output {
 
             let state_width = output_wire.width.div_ceil(LogicStateAtom::BITS);
             let state_offset = output_states.push(state_width)?;
-            output_wire.add_driver(wire_drivers, state_width, state_offset)?;
+            output_wire.add_driver(wire_drivers, output_wire.width, state_offset)?;
 
             let output = ComponentOutput {
                 width: output_wire.width,
@@ -399,7 +399,7 @@ impl ComponentPorts for NotGatePorts {
 }
 
 impl ComponentPorts for BufferPorts {
-    const COMPONENT_KIND: ComponentKind = ComponentKind::Not;
+    const COMPONENT_KIND: ComponentKind = ComponentKind::Buffer;
 
     single_output!();
 

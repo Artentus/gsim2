@@ -7,10 +7,29 @@ fn logic_state_equal(a: LogicStateAtom, b: LogicStateAtom) -> bool {
     return (a.state == b.state) && (a.valid == b.valid);
 }
 
+fn high_z_to_undefined(v: LogicStateAtom) -> LogicStateAtom {
+    return LogicStateAtom(
+        v.state | ~v.valid,
+        v.valid,
+    );
+}
+
 const HIGH_Z    = LogicStateAtom(0x00000000u, 0x00000000u);
 const UNDEFINED = LogicStateAtom(0xFFFFFFFFu, 0x00000000u);
 const LOGIC_0   = LogicStateAtom(0x00000000u, 0xFFFFFFFFu);
 const LOGIC_1   = LogicStateAtom(0xFFFFFFFFu, 0xFFFFFFFFu);
+
+struct LogicBitState {
+    state: bool,
+    valid: bool,
+}
+
+fn get_bit_state(v: LogicStateAtom, index: u32) -> LogicBitState {
+    return LogicBitState(
+        ((v.state >> index) & 0x1u) != 0u,
+        ((v.valid >> index) & 0x1u) != 0u,
+    );
+}
 
 fn logic_and(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
@@ -99,93 +118,6 @@ fn logic_xor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
     return LogicStateAtom(state, valid);
 }
 
-fn logic_nand(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
-    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
-    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
-    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-
-    let state = ~a.state | ~a.valid | ~b.state | ~b.valid;
-
-    let valid = ( a.valid & b.valid)
-              | (~a.state & a.valid)
-              | (~b.state & b.valid);
-
-    return LogicStateAtom(state, valid);
-}
-
-fn logic_nor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
-    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
-    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
-    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    0    |    1    | Logic 0
-    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    0    |    1    | Logic 0
-    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
-    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-
-    let state = (~a.state & ~b.state)
-              | (~a.valid & ~b.valid)
-              | (~a.state & ~b.valid)
-              | (~b.state & ~a.valid);
-
-    let valid = (a.state & a.valid)
-              | (b.state & b.valid)
-              | (a.valid & b.valid);
-
-    return LogicStateAtom(state, valid);
-}
-
-fn logic_xnor(a: LogicStateAtom, b: LogicStateAtom) -> LogicStateAtom {
-    //  A state | A valid | A meaning | B state | B valid | B meaning | O state | O valid | O meaning
-    // ---------|---------|-----------|---------|---------|-----------|---------|---------|-----------
-    //     0    |    0    | High-Z    |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     1    |    1    | Logic 1   |    0    |    0    | High-Z    |    1    |    0    | Undefined
-    //     0    |    0    | High-Z    |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     1    |    1    | Logic 1   |    1    |    0    | Undefined |    1    |    0    | Undefined
-    //     0    |    0    | High-Z    |    0    |    1    | Logic 0   |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    0    |    1    | Logic 0   |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    0    |    1    | Logic 0   |    1    |    1    | Logic 1
-    //     1    |    1    | Logic 1   |    0    |    1    | Logic 0   |    0    |    1    | Logic 0
-    //     0    |    0    | High-Z    |    1    |    1    | Logic 1   |    1    |    0    | Undefined
-    //     1    |    0    | Undefined |    1    |    1    | Logic 1   |    1    |    0    | Undefined
-    //     0    |    1    | Logic 0   |    1    |    1    | Logic 1   |    0    |    1    | Logic 0
-    //     1    |    1    | Logic 1   |    1    |    1    | Logic 1   |    1    |    1    | Logic 1
-
-    let state = ~(a.state ^ b.state) | ~a.valid | ~b.valid;
-    let valid = a.valid & b.valid;
-
-    return LogicStateAtom(state, valid);
-}
-
 fn logic_not(v: LogicStateAtom) -> LogicStateAtom {
     //  I state | I valid | I meaning | O state | O valid | O meaning
     // ---------|---------|-----------|---------|---------|-----------
@@ -211,11 +143,6 @@ fn carry_add(a: u32, b: u32, c: bool) -> WideningAddResult {
     let r1 = widening_add(a, b);
     let r2 = widening_add(r1.sum, u32(c));
     return WideningAddResult(r2.sum, r1.carry | r2.carry);
-}
-
-struct LogicBitState {
-    state: bool,
-    valid: bool,
 }
 
 struct AddResult {

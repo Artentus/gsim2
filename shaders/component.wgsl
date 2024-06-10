@@ -12,7 +12,7 @@ fn gate_impl(component: Component) -> bool {
         }
     }
 
-    for (var input_index = 0u; input_index < component.input_count; input_index++) {
+    for (var input_index = 1u; input_index < component.input_count; input_index++) {
         let c_input = inputs[component.first_input + input_index];
 
         for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
@@ -26,23 +26,14 @@ fn gate_impl(component: Component) -> bool {
             }
 
             switch component.kind {
-                case COMPONENT_KIND_AND: {
+                case COMPONENT_KIND_AND, COMPONENT_KIND_NAND: {
                     new_state[index] = logic_and(new_state[index], input_atom);
                 }
-                case COMPONENT_KIND_OR: {
+                case COMPONENT_KIND_OR, COMPONENT_KIND_NOR: {
                     new_state[index] = logic_or(new_state[index], input_atom);
                 }
-                case COMPONENT_KIND_XOR: {
+                case COMPONENT_KIND_XOR, COMPONENT_KIND_XNOR: {
                     new_state[index] = logic_xor(new_state[index], input_atom);
-                }
-                case COMPONENT_KIND_NAND: {
-                    new_state[index] = logic_nand(new_state[index], input_atom);
-                }
-                case COMPONENT_KIND_NOR: {
-                    new_state[index] = logic_nor(new_state[index], input_atom);
-                }
-                case COMPONENT_KIND_XNOR: {
-                    new_state[index] = logic_xnor(new_state[index], input_atom);
                 }
                 default: {}
             }
@@ -53,9 +44,17 @@ fn gate_impl(component: Component) -> bool {
     for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
         let index = bit_index / ATOM_BITS;
 
+        var atom = new_state[index];
+        switch component.kind {
+            case COMPONENT_KIND_NAND, COMPONENT_KIND_NOR, COMPONENT_KIND_XNOR: {
+                atom = logic_not(atom);
+            }
+            default: {}
+        }
+
         let dst = &output_states[component.output_offset_or_first_output + index];
-        if !logic_state_equal(*dst, new_state[index]) {
-            *dst = new_state[index];
+        if !logic_state_equal(*dst, atom) {
+            *dst = atom;
             state_changed = true;
         }
     }
@@ -92,18 +91,18 @@ fn buffer_impl(component: Component) -> bool {
     let c_input = inputs[component.first_input];
     let c_enable = inputs[component.first_input + 1u];
 
-    let enable_state = (wire_states[c_enable.wire_state_offset].state & 0x1u) > 0u;
-    let enable_valid = (wire_states[c_enable.wire_state_offset].valid & 0x1u) > 0u;
+    let enable_atom = wire_states[c_enable.wire_state_offset];
+    let enable_bit = get_bit_state(enable_atom, 0u);
 
     var state_changed = false;
     for (var bit_index = 0u; bit_index < component.output_width; bit_index += ATOM_BITS) {
         let index = bit_index / ATOM_BITS;
 
         var atom: LogicStateAtom;
-        if !enable_valid {
+        if enable_bit.state && !enable_bit.valid {
             atom = UNDEFINED;
-        } else if (enable_state) && (bit_index < c_input.width) {
-            atom = wire_states[c_input.wire_state_offset + index];
+        } else if enable_bit.state && enable_bit.valid && (bit_index < c_input.width) {
+            atom = high_z_to_undefined(wire_states[c_input.wire_state_offset + index]);
         } else {
             atom = HIGH_Z;
         }

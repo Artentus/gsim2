@@ -4,6 +4,9 @@ mod graph;
 mod logic;
 mod vec;
 
+#[cfg(test)]
+mod test;
+
 use buffer::*;
 use bytemuck::{Pod, Zeroable};
 use graph::*;
@@ -47,6 +50,8 @@ impl From<BufferPushError> for AddWireError {
     }
 }
 
+pub type AddWireResult = Result<WireId, AddWireError>;
+
 #[derive(Debug, Clone)]
 pub struct InvalidWireIdError;
 
@@ -64,6 +69,8 @@ impl From<BufferPushError> for AddComponentError {
         }
     }
 }
+
+pub type AddComponentResult = Result<ComponentId, AddComponentError>;
 
 macro_rules! gate_ports {
     ($ports:ident) => {
@@ -210,7 +217,7 @@ pub struct SimulatorBuilder {
 }
 
 impl SimulatorBuilder {
-    pub fn add_wire(&mut self, width: u32) -> Result<WireId, AddWireError> {
+    pub fn add_wire(&mut self, width: u32) -> AddWireResult {
         if (width < MIN_WIRE_WIDTH) || (width > MAX_WIRE_WIDTH) {
             return Err(AddWireError::WidthOutOfRange);
         }
@@ -234,10 +241,7 @@ impl SimulatorBuilder {
 
     wire_drive_fns!();
 
-    pub fn add_component<Ports: ComponentPorts>(
-        &mut self,
-        ports: Ports,
-    ) -> Result<ComponentId, AddComponentError> {
+    pub fn add_component<Ports: ComponentPorts>(&mut self, ports: Ports) -> AddComponentResult {
         let output_kind = ports.create_outputs(
             &mut self.wire_drivers,
             &mut self.wires,
@@ -293,8 +297,8 @@ struct ListData {
 const WORKGROUP_SIZE: u32 = 64;
 
 pub struct Simulator {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: &'static wgpu::Device,
+    queue: &'static wgpu::Queue,
 
     list_data_buffer: wgpu::Buffer,
     conflict_list_buffer: wgpu::Buffer,
@@ -372,6 +376,48 @@ impl Simulator {
         list_data
     }
 
+    fn first_tick(&mut self) {
+        self.queue.write_buffer(
+            &self.list_data_buffer,
+            0,
+            bytemuck::bytes_of(&ListData {
+                wires_changed: 0,
+                components_changed: self.components.len(),
+                conflict_list_len: 0,
+                has_conflicts: 0,
+            }),
+        );
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_pipeline(&self.wire_pipeline);
+            pass.dispatch_workgroups(self.wires.len().div_ceil(WORKGROUP_SIZE), 1, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+
+        self.queue.write_buffer(
+            &self.list_data_buffer,
+            0,
+            bytemuck::bytes_of(&ListData {
+                wires_changed: self.wires.len(),
+                components_changed: 0,
+                conflict_list_len: 0,
+                has_conflicts: 0,
+            }),
+        );
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_pipeline(&self.component_pipeline);
+            pass.dispatch_workgroups(self.components.len().div_ceil(WORKGROUP_SIZE), 1, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+    }
+
     pub fn run(&mut self, mut max_steps: u64) -> SimulationRunResult {
         const RESET_WIRES_CHANGED: u32 = 0x1;
         const RESET_COMPONENTS_CHANGED: u32 = 0x2;
@@ -390,16 +436,7 @@ impl Simulator {
         self.wire_states_need_sync = true;
         self.memory_needs_sync = true;
 
-        self.queue.write_buffer(
-            &self.list_data_buffer,
-            0,
-            bytemuck::bytes_of(&ListData {
-                wires_changed: self.wires.len(),
-                components_changed: self.components.len(),
-                conflict_list_len: 0,
-                has_conflicts: 0,
-            }),
-        );
+        self.first_tick();
 
         while max_steps > 0 {
             let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -462,32 +499,4 @@ impl Simulator {
         self.wire_states_need_sync = false;
         self.memory_needs_sync = false;
     }
-}
-
-#[test]
-fn run() {
-    let mut builder = SimulatorBuilder::default();
-    let input_a = builder.add_wire(1).unwrap();
-    let input_b = builder.add_wire(1).unwrap();
-    let output = builder.add_wire(1).unwrap();
-    let gate = builder
-        .add_component(AndGatePorts {
-            inputs: &[input_a, input_b],
-            output,
-        })
-        .unwrap();
-
-    let mut sim = builder.build().unwrap();
-    sim.set_wire_drive(input_a, &false.into()).unwrap();
-    sim.set_wire_drive(input_b, &true.into()).unwrap();
-    let result = sim.run(3);
-    assert!(matches!(result, SimulationRunResult::Ok), "{result:?}");
-
-    let input_a_state = sim.get_wire_state(input_a).unwrap();
-    let input_b_state = sim.get_wire_state(input_b).unwrap();
-    let output_state = sim.get_wire_state(output).unwrap();
-
-    assert!(input_a_state.eq(&false.into(), 1));
-    assert!(input_b_state.eq(&true.into(), 1));
-    assert!(output_state.eq(&false.into(), 1));
 }

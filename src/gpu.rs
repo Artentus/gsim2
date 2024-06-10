@@ -2,8 +2,57 @@ use crate::*;
 use bytemuck::Pod;
 use std::mem;
 use std::slice;
+use std::sync::OnceLock;
 use wgpu::Buffer;
 use wgpu::*;
+
+fn create_device() -> (Device, Queue) {
+    let instance_desc = InstanceDescriptor {
+        backends: Backends::VULKAN | Backends::METAL,
+        ..Default::default()
+    };
+    let instance = Instance::new(instance_desc);
+
+    let adapter_opts = RequestAdapterOptions {
+        power_preference: PowerPreference::HighPerformance,
+        ..Default::default()
+    };
+    let adapter = pollster::block_on(instance.request_adapter(&adapter_opts))
+        .expect("graphics adapter not found");
+
+    let adapter_limits = adapter.limits();
+    let device_limits = Limits {
+        max_bind_groups: 2,
+        max_bindings_per_bind_group: 16,
+        max_storage_buffers_per_shader_stage: 16,
+        max_push_constant_size: 128,
+
+        max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
+        max_compute_invocations_per_workgroup: adapter_limits.max_compute_invocations_per_workgroup,
+        max_compute_workgroup_size_x: adapter_limits.max_compute_workgroup_size_x,
+        max_compute_workgroup_size_y: adapter_limits.max_compute_workgroup_size_y,
+        max_compute_workgroup_size_z: adapter_limits.max_compute_workgroup_size_z,
+        max_compute_workgroups_per_dimension: adapter_limits.max_compute_workgroups_per_dimension,
+        min_subgroup_size: adapter_limits.min_subgroup_size,
+        max_subgroup_size: adapter_limits.max_subgroup_size,
+        ..Limits::downlevel_defaults()
+    };
+
+    let device_desc = DeviceDescriptor {
+        required_limits: device_limits,
+        required_features: Features::PUSH_CONSTANTS,
+        ..Default::default()
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&device_desc, None))
+        .expect("graphics device not supported");
+
+    (device, queue)
+}
+
+fn device() -> &'static (Device, Queue) {
+    static DEVICE: OnceLock<(Device, Queue)> = OnceLock::new();
+    DEVICE.get_or_init(create_device)
+}
 
 pub fn read_buffer<T: Pod>(
     buffer: &Buffer,
@@ -43,48 +92,6 @@ pub fn read_buffer<T: Pod>(
 
     mem::drop(staging_view);
     staging_buffer.unmap();
-}
-
-fn create_device() -> Result<(Device, Queue), ()> {
-    let instance_desc = InstanceDescriptor {
-        backends: Backends::VULKAN | Backends::METAL,
-        ..Default::default()
-    };
-    let instance = Instance::new(instance_desc);
-
-    let adapter_opts = RequestAdapterOptions {
-        power_preference: PowerPreference::HighPerformance,
-        ..Default::default()
-    };
-    let adapter = pollster::block_on(instance.request_adapter(&adapter_opts)).ok_or(())?;
-
-    let adapter_limits = adapter.limits();
-    let device_limits = Limits {
-        max_bind_groups: 2,
-        max_bindings_per_bind_group: 16,
-        max_storage_buffers_per_shader_stage: 16,
-        max_push_constant_size: 128,
-
-        max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
-        max_compute_invocations_per_workgroup: adapter_limits.max_compute_invocations_per_workgroup,
-        max_compute_workgroup_size_x: adapter_limits.max_compute_workgroup_size_x,
-        max_compute_workgroup_size_y: adapter_limits.max_compute_workgroup_size_y,
-        max_compute_workgroup_size_z: adapter_limits.max_compute_workgroup_size_z,
-        max_compute_workgroups_per_dimension: adapter_limits.max_compute_workgroups_per_dimension,
-        min_subgroup_size: adapter_limits.min_subgroup_size,
-        max_subgroup_size: adapter_limits.max_subgroup_size,
-        ..Limits::downlevel_defaults()
-    };
-
-    let device_desc = DeviceDescriptor {
-        required_limits: device_limits,
-        required_features: Features::PUSH_CONSTANTS,
-        ..Default::default()
-    };
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&device_desc, None)).map_err(|_| ())?;
-
-    Ok((device, queue))
 }
 
 const BIND_GROUP_ENTRIES: &[BindGroupLayoutEntry] = &[
@@ -219,7 +226,7 @@ pub fn create_simulator(builder: SimulatorBuilder) -> Result<Simulator, ()> {
     use wgpu::util::{BufferInitDescriptor, DeviceExt};
     use wgpu::*;
 
-    let (device, queue) = create_device()?;
+    let (device, queue) = device();
 
     let list_data_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: None,
